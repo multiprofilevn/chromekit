@@ -94,27 +94,42 @@ func buildAllocatorOptions(cfg *config) []chromedp.ExecAllocatorOption {
 	return opts
 }
 
-// Close cancels every page, then the browser, then the allocator.
-// Order matters — reversing it leaks chromedp goroutines.
+// Close cancels every page, then the browser, then (for Launch) the
+// allocator. Order matters — reversing it leaks chromedp goroutines.
 //
-// CAVEAT: when the Browser was built via Connect, calling Close exits the
-// chrome process. chromedp's RemoteAllocator hardcodes a cancel-handler that
-// sends Browser.close on ctx.Done(), and there is no public API to opt out.
-// Working around it would require a custom allocator (~100 LOC). Until that
-// lands, dev workflows that want to keep chrome alive across Connect cycles
-// must launch chrome with two tabs (so closing one doesn't exit the process)
-// or accept the re-launch cost.
+// For Connect (b.attached), the allocator cancel is INTENTIONALLY skipped.
+// chromedp's RemoteAllocator hardcodes a cancel-handler that sends CDP
+// Browser.close on ctx.Done(), which exits the entire chrome process —
+// hostile when chromekit doesn't own that process. Skipping allocCancel
+// keeps the chrome process alive at the cost of leaking 1 goroutine + 1
+// browser-level WebSocket per Connect/Close cycle. Acceptable for typical
+// dev workflows; long-lived processes that loop Connect/Close many times
+// should reuse a single Browser instead. A real fix needs a custom
+// allocator with chromedp's setContext (currently unexported).
 func (b *Browser) Close() {
 	b.pagesMu.Lock()
-	for i := len(b.pages) - 1; i >= 0; i-- {
-		if b.pages[i].cancel != nil {
-			b.pages[i].cancel()
-		}
-	}
+	pages := b.pages
 	b.pages = nil
 	b.current = nil
 	b.pagesMu.Unlock()
 
+	if b.attached {
+		// Cancelling ANY chromedp context derived from this Browser closes
+		// the browser-level WebSocket, which trips chromedp's
+		// LostConnection handler -> Cancel(ctx) -> CDP Browser.close ->
+		// chrome process exit. To keep chrome alive we drop references and
+		// let GC reclaim the goroutines. One goroutine + one WebSocket
+		// leak per Connect/Close cycle. Acceptable for typical dev use;
+		// production loops should reuse a single Browser.
+		_ = pages
+		return
+	}
+
+	for i := len(pages) - 1; i >= 0; i-- {
+		if pages[i].cancel != nil {
+			pages[i].cancel()
+		}
+	}
 	if b.cancel != nil {
 		b.cancel()
 	}
