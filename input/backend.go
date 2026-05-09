@@ -49,6 +49,29 @@ type Config struct {
 	Window Window
 }
 
+// Modifier is a bitmask of modifier keys for KeyCombo. Compose with bitwise
+// OR (e.g. ModCtrl | ModShift). Pass 0 for an unmodified key.
+type Modifier uint32
+
+const (
+	ModCtrl  Modifier = 1 << iota // Control / Cmd-equivalent
+	ModAlt                        // Alt / Option
+	ModShift
+	ModWin // Windows / Super
+)
+
+// Virtual-key codes for the most common non-character keys used by KeyCombo.
+// Match Win32 VK_* values — the native backend forwards them as-is.
+const (
+	VKReturn uint16 = 0x0D
+	VKEscape uint16 = 0x1B
+	VKEnd    uint16 = 0x23
+	VKHome   uint16 = 0x24
+	VKDelete uint16 = 0x2E
+	VKA      uint16 = 0x41
+	VKL      uint16 = 0x4C
+)
+
 // Backend is the low-level mouse/keyboard dispatcher. Higher-level helpers
 // (Cursor, Keyboard, TouchScreen) layer human-like behavior on top.
 type Backend interface {
@@ -58,6 +81,12 @@ type Backend interface {
 	MouseScroll(ctx context.Context, deltaX, deltaY float64) error
 	KeyChar(ctx context.Context, ch rune) error
 	InsertText(ctx context.Context, text string) error
+	// KeyCombo presses a virtual-key code with optional modifiers held down,
+	// then releases everything. Use for shortcuts (Ctrl+L, Ctrl+A) and
+	// non-character keys (Enter, End, Esc) that KeyChar can't dispatch.
+	// Returns ErrNotSupported on backends that lack OS keyboard access (CDP,
+	// native on macOS/Linux today).
+	KeyCombo(ctx context.Context, vk uint16, mods Modifier) error
 }
 
 // New returns a backend by type. Native on unsupported platforms returns a

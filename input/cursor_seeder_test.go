@@ -24,6 +24,7 @@ func (f *fakeBackend) MouseUp(_ context.Context, _, _ float64, _ MouseButton) er
 func (f *fakeBackend) MouseScroll(_ context.Context, _, _ float64) error              { return nil }
 func (f *fakeBackend) KeyChar(_ context.Context, _ rune) error                        { return nil }
 func (f *fakeBackend) InsertText(_ context.Context, _ string) error                   { return nil }
+func (f *fakeBackend) KeyCombo(_ context.Context, _ uint16, _ Modifier) error         { return nil }
 
 func (f *fakeBackend) OSPositionCSS() (float64, float64, bool) {
 	return f.osCSSX, f.osCSSY, f.hasOSPos
@@ -80,3 +81,4 @@ func (b *noSeederBackend) MouseUp(_ context.Context, _, _ float64, _ MouseButton
 func (b *noSeederBackend) MouseScroll(_ context.Context, _, _ float64) error            { return nil }
 func (b *noSeederBackend) KeyChar(_ context.Context, _ rune) error                      { return nil }
 func (b *noSeederBackend) InsertText(_ context.Context, _ string) error                 { return nil }
+func (b *noSeederBackend) KeyCombo(_ context.Context, _ uint16, _ Modifier) error       { return nil }

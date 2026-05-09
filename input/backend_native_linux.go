@@ -18,5 +18,6 @@ func (nativeBackend) MouseUp(context.Context, float64, float64, MouseButton) err
 func (nativeBackend) MouseScroll(context.Context, float64, float64) error { return ErrNotSupported }
 func (nativeBackend) KeyChar(context.Context, rune) error                 { return ErrNotSupported }
 func (nativeBackend) InsertText(context.Context, string) error            { return ErrNotSupported }
+func (nativeBackend) KeyCombo(context.Context, uint16, Modifier) error    { return ErrNotSupported }
 
 var _ Backend = (*nativeBackend)(nil)

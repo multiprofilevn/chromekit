@@ -48,6 +48,12 @@ func (k *Keyboard) Press(ctx context.Context, ch rune) error {
 	return k.backend.KeyChar(ctx, ch)
 }
 
+// Combo presses a virtual-key code with the given modifiers held. Convenience
+// wrapper over Backend.KeyCombo so callers stay on the Keyboard layer.
+func (k *Keyboard) Combo(ctx context.Context, vk uint16, mods Modifier) error {
+	return k.backend.KeyCombo(ctx, vk, mods)
+}
+
 func (k *Keyboard) sleep() {
 	min := int(k.MinDelay / time.Millisecond)
 	max := int(k.MaxDelay / time.Millisecond)

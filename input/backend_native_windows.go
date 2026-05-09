@@ -188,6 +188,76 @@ func (n *nativeBackend) InsertText(ctx context.Context, text string) error {
 	return nil
 }
 
+// vkForModifier maps a Modifier bit to its Win32 virtual-key code.
+const (
+	vkControl uint16 = 0x11
+	vkMenuKey uint16 = 0x12 // VK_MENU = ALT (renamed to avoid clash)
+	vkShift   uint16 = 0x10
+	vkLWin    uint16 = 0x5B
+)
+
+func (n *nativeBackend) KeyCombo(ctx context.Context, vk uint16, mods Modifier) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Walk the bits in a stable order (Ctrl, Alt, Shift, Win) so press/
+	// release pair up symmetrically.
+	mappings := []struct {
+		bit Modifier
+		key uint16
+	}{
+		{ModCtrl, vkControl},
+		{ModAlt, vkMenuKey},
+		{ModShift, vkShift},
+		{ModWin, vkLWin},
+	}
+	var held []uint16
+	for _, m := range mappings {
+		if mods&m.bit != 0 {
+			held = append(held, m.key)
+		}
+	}
+
+	for _, k := range held {
+		if err := sendVK(k, 0); err != nil {
+			return err
+		}
+		time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
+	}
+	if err := sendVK(vk, 0); err != nil {
+		return err
+	}
+	time.Sleep(time.Duration(40+rand.Intn(40)) * time.Millisecond)
+	if err := sendVK(vk, keyEventfKeyUp); err != nil {
+		return err
+	}
+	time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
+	for i := len(held) - 1; i >= 0; i-- {
+		if err := sendVK(held[i], keyEventfKeyUp); err != nil {
+			return err
+		}
+		time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
+	}
+	return nil
+}
+
+// sendVK sends one keyboard event by virtual-key code (WVk field), without
+// the Unicode flag — use for modifier keys + non-character VK like Enter,
+// End, Esc, F-keys. flags = 0 for down, keyEventfKeyUp for up.
+func sendVK(vk uint16, flags uint32) error {
+	nativeInputMu.Lock()
+	defer nativeInputMu.Unlock()
+	in := keyboardInputRaw{
+		Type: inputKeyboard,
+		Ki:   keyboardInput{WVk: vk, DwFlags: flags},
+	}
+	ret, _, errno := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
+	if ret != 1 {
+		return errno
+	}
+	return nil
+}
+
 func mouseDownFlag(b MouseButton) uint32 {
 	switch b {
 	case MouseRight:

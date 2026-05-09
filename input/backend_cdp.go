@@ -55,6 +55,13 @@ func (cdpBackend) InsertText(ctx context.Context, text string) error {
 	}))
 }
 
+// KeyCombo is intentionally unsupported on CDP — the omnibox flow that
+// needs it is a native-only feature, and CDP key events would target the
+// page DOM rather than Chrome's UI.
+func (cdpBackend) KeyCombo(_ context.Context, _ uint16, _ Modifier) error {
+	return ErrNotSupported
+}
+
 func toCDPButton(b MouseButton) cdpinput.MouseButton {
 	switch b {
 	case MouseRight:
