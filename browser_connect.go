@@ -44,6 +44,8 @@ func Connect(port int, opts ...Option) (*Browser, error) {
 		cfg:         cfg,
 		log:         cfg.logger,
 		allocCancel: allocCancel,
+		attached:    true,
+		port:        port,
 	}
 
 	if len(targets) == 0 {

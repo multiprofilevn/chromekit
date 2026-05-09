@@ -24,10 +24,23 @@ type Browser struct {
 	hwndMu     sync.Mutex
 	cachedHWND uintptr
 
-	contentMu       sync.Mutex
-	contentOffsetX  int
-	contentOffsetY  int
-	contentCached   bool
+	contentMu      sync.Mutex
+	contentOffsetX int
+	contentOffsetY int
+	contentCached  bool
+
+	// attached is true when this Browser was built via Connect (chromekit
+	// does NOT own the chrome process). Close() then detaches the targets
+	// instead of closing them, leaving the chrome process running.
+	attached bool
+
+	// port is the CDP remote-debugging port from Connect. Used by HWND PID
+	// lookup to find the chrome main process. 0 for Launch path.
+	port int
+
+	// pid is the chrome browser process PID for Launch path (chromekit
+	// spawned it). 0 for Connect path — looked up from port at HWND time.
+	pid uint32
 }
 
 // Launch starts Chrome with the given options and opens the first blank page.
@@ -83,6 +96,14 @@ func buildAllocatorOptions(cfg *config) []chromedp.ExecAllocatorOption {
 
 // Close cancels every page, then the browser, then the allocator.
 // Order matters — reversing it leaks chromedp goroutines.
+//
+// CAVEAT: when the Browser was built via Connect, calling Close exits the
+// chrome process. chromedp's RemoteAllocator hardcodes a cancel-handler that
+// sends Browser.close on ctx.Done(), and there is no public API to opt out.
+// Working around it would require a custom allocator (~100 LOC). Until that
+// lands, dev workflows that want to keep chrome alive across Connect cycles
+// must launch chrome with two tabs (so closing one doesn't exit the process)
+// or accept the re-launch cost.
 func (b *Browser) Close() {
 	b.pagesMu.Lock()
 	for i := len(b.pages) - 1; i >= 0; i-- {
