@@ -90,12 +90,23 @@ func (b *Browser) HWND() (uintptr, error) {
 // confirms the switch. Windows blocks SetForegroundWindow when the calling
 // process has not had foreground recently; mitigated via
 // AllowSetForegroundWindow + an ALT-tap retry.
+//
+// Before HWND lookup, Focus activates the current tab via CDP so the OS title
+// bar reflects this page's title — title-substring HWND lookup depends on it.
+// HWND lookup itself retries up to 500ms because Chrome → Win32 title
+// propagation is asynchronous (typically 50-200ms after activateTarget).
 func (b *Browser) Focus(ctx context.Context) error {
-	hwnd, err := b.HWND()
-	if err != nil {
-		return err
+	if p := b.Current(); p != nil {
+		if err := p.BringToFront(); err != nil {
+			b.log.Warnf("focus: BringToFront failed: %v", err)
+		}
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	hwnd, err := b.lookupHWNDWithRetry(ctx, 500*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
 		return err
 	}
 
@@ -123,6 +134,32 @@ func (b *Browser) Focus(ctx context.Context) error {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return fmt.Errorf("focus: SetForegroundWindow refused (hwnd=0x%x)", hwnd)
+}
+
+// lookupHWNDWithRetry calls b.HWND() and retries on the "no Chrome window
+// matching title" error up to budget, sleeping step between attempts. Other
+// errors return immediately. Respects ctx cancellation.
+func (b *Browser) lookupHWNDWithRetry(ctx context.Context, budget, step time.Duration) (uintptr, error) {
+	deadline := time.Now().Add(budget)
+	attempts := 0
+	for {
+		attempts++
+		hwnd, err := b.HWND()
+		if err == nil {
+			return hwnd, nil
+		}
+		if !strings.Contains(err.Error(), "no Chrome window matching") {
+			return 0, err
+		}
+		if time.Now().After(deadline) {
+			return 0, fmt.Errorf("focus: title not visible after %v (retried %d): %w", budget, attempts, err)
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(step):
+		}
+	}
 }
 
 func foregroundIs(hwnd uintptr) bool {

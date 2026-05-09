@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/tuwibu/chromekit/input"
 )
@@ -44,12 +45,15 @@ func (p *Page) Close() {
 	}
 }
 
-// BringToFront focuses the tab in Chrome.
+// BringToFront activates the tab in Chrome's UI so it becomes the visible /
+// foreground tab. Required before native input — when the tab is in the
+// background, the OS window's title bar reflects another tab and HWND lookup
+// by title misses.
 func (p *Page) BringToFront() error {
 	if err := p.alive(); err != nil {
 		return err
 	}
-	return chromedp.Run(p.ctx, chromedp.Evaluate(`window.focus()`, nil))
+	return chromedp.Run(p.ctx, target.ActivateTarget(target.ID(p.id)))
 }
 
 // GetURL returns the current document URL.
