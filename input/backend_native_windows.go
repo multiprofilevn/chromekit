@@ -72,9 +72,10 @@ type keyboardInputRaw struct {
 }
 
 var (
-	user32       = syscall.NewLazyDLL("user32.dll")
-	procSendInput   = user32.NewProc("SendInput")
+	user32           = syscall.NewLazyDLL("user32.dll")
+	procSendInput    = user32.NewProc("SendInput")
 	procSetCursorPos = user32.NewProc("SetCursorPos")
+	procGetCursorPos = user32.NewProc("GetCursorPos")
 )
 
 type nativeBackend struct {
@@ -93,6 +94,29 @@ func (n *nativeBackend) toScreen(x, y float64) (int32, int32) {
 	sx := int32(math.Floor(float64(n.win.X) + x*n.win.Scale))
 	sy := int32(math.Floor(float64(n.win.Y) + y*n.win.Scale))
 	return sx, sy
+}
+
+// posPoint mirrors Win32 POINT.
+type posPoint struct{ X, Y int32 }
+
+// OSPositionCSS returns the current OS cursor position translated into this
+// backend's CSS coordinate space (relative to the browser window). Used by
+// Cursor.MoveTo to pick the correct start point — without this, the cursor
+// "teleports" between browsers because each Cursor instance otherwise tracks
+// only the last CSS coord it saw, not where the OS pointer physically is.
+func (n *nativeBackend) OSPositionCSS() (float64, float64, bool) {
+	var p posPoint
+	ok, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
+	if ok == 0 {
+		return 0, 0, false
+	}
+	scale := n.win.Scale
+	if scale <= 0 {
+		scale = 1.0
+	}
+	cssX := (float64(p.X) - float64(n.win.X)) / scale
+	cssY := (float64(p.Y) - float64(n.win.Y)) / scale
+	return cssX, cssY, true
 }
 
 func (n *nativeBackend) MouseMove(ctx context.Context, x, y float64) error {

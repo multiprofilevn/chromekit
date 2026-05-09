@@ -24,7 +24,16 @@ func (p *Page) initInput() {
 			}
 		}
 		p.backend = input.New(t, input.Config{Window: win})
-		p.cursor = input.NewCursor(p.backend)
+		profile := input.ProfileHuman
+		if p.cfg != nil {
+			switch p.cfg.cursorProfile {
+			case CursorFast:
+				profile = input.ProfileFast
+			case CursorMachine:
+				profile = input.ProfileMachine
+			}
+		}
+		p.cursor = input.NewCursorWithProfile(p.backend, profile)
 		p.keyboard = input.NewKeyboard(p.backend)
 		p.touch = input.NewTouchScreen(p.backend)
 	})

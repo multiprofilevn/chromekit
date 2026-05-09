@@ -17,6 +17,21 @@ type nativeWindow struct {
 	Scale float64
 }
 
+// CursorProfile selects the cursor movement style used by Cursor.MoveTo.
+type CursorProfile int
+
+const (
+	// CursorHuman draws a Bezier path with ease-in-out and per-distance step
+	// count. Best for sites with bot detection. Default.
+	CursorHuman CursorProfile = iota
+	// CursorFast uses a short linear path with minimal sleep — good for tests
+	// and CI where wall time matters more than realism.
+	CursorFast
+	// CursorMachine moves in one shot via SetCursorPos. Fastest, no jitter,
+	// looks robotic. Use only for benchmarking.
+	CursorMachine
+)
+
 type config struct {
 	logger        Logger
 	userDataDir   string
@@ -24,16 +39,18 @@ type config struct {
 	proxy         string
 	inputBackend  BackendType
 	nativeWindow  nativeWindow
+	cursorProfile CursorProfile
 	flags         map[string]any
 }
 
 func defaultConfig() *config {
 	return &config{
-		logger:       noopLogger{},
-		headless:     false,
-		inputBackend: BackendCDP,
-		nativeWindow: nativeWindow{Scale: 1.0},
-		flags:        map[string]any{},
+		logger:        noopLogger{},
+		headless:      false,
+		inputBackend:  BackendCDP,
+		nativeWindow:  nativeWindow{Scale: 1.0},
+		cursorProfile: CursorHuman,
+		flags:         map[string]any{},
 	}
 }
 
@@ -74,6 +91,14 @@ func WithNativeWindow(x, y int, scale float64) Option {
 		}
 		c.nativeWindow = nativeWindow{X: x, Y: y, Scale: scale}
 	}
+}
+
+// WithCursorProfile picks the cursor movement style. Default is CursorHuman
+// (Bezier + ease-in-out). Switch to CursorFast for CI speed or CursorMachine
+// for one-shot benchmark moves. Only the native backend honors the profile —
+// CDP backend dispatches mouse events directly with no intermediate steps.
+func WithCursorProfile(p CursorProfile) Option {
+	return func(c *config) { c.cursorProfile = p }
 }
 
 // WithFlag passes an arbitrary chromedp ExecAllocatorOption flag.
