@@ -31,9 +31,17 @@ const (
 
 // Window describes where the Chrome window sits on screen, so DOM coordinates
 // can be converted to absolute screen pixels by the native backend.
+//
+// X, Y are the window's top-left in screen pixels (matches Chrome's
+// --window-position flag). ContentOffsetX/Y are the chrome-chrome offset
+// (title bar + tabs + omnibox), so CSS (0,0) — the page content origin —
+// maps to screen (X + ContentOffsetX, Y + ContentOffsetY). Scale is the OS
+// DPI factor applied to CSS coords before the offsets are added.
 type Window struct {
-	X, Y  int
-	Scale float64
+	X, Y           int
+	Scale          float64
+	ContentOffsetX int
+	ContentOffsetY int
 }
 
 // Config bundles knobs the backends need at construction time.

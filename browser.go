@@ -23,6 +23,11 @@ type Browser struct {
 
 	hwndMu     sync.Mutex
 	cachedHWND uintptr
+
+	contentMu       sync.Mutex
+	contentOffsetX  int
+	contentOffsetY  int
+	contentCached   bool
 }
 
 // Launch starts Chrome with the given options and opens the first blank page.

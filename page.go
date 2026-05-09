@@ -12,11 +12,12 @@ import (
 
 // Page is a Chrome tab. Hides chromedp's context plumbing behind methods.
 type Page struct {
-	id     string
-	ctx    context.Context
-	cancel context.CancelFunc
-	log    Logger
-	cfg    *config
+	id      string
+	ctx     context.Context
+	cancel  context.CancelFunc
+	log     Logger
+	cfg     *config
+	browser *Browser // back-ref for ContentOffset lookup; may be nil pre-Connect
 
 	mu    sync.RWMutex
 	index int

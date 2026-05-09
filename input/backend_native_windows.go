@@ -91,8 +91,12 @@ func newNative(cfg Config) Backend {
 }
 
 func (n *nativeBackend) toScreen(x, y float64) (int32, int32) {
-	sx := int32(math.Floor(float64(n.win.X) + x*n.win.Scale))
-	sy := int32(math.Floor(float64(n.win.Y) + y*n.win.Scale))
+	// Window.X/Y is the window's screen top-left. ContentOffsetX/Y is the
+	// chrome-chrome offset (title bar + tabs + omnibox). CSS (x, y) is
+	// content-relative and gets DPI-scaled before being added — the offset
+	// is already in raw screen pixels and is added without scaling.
+	sx := int32(math.Floor(float64(n.win.X+n.win.ContentOffsetX) + x*n.win.Scale))
+	sy := int32(math.Floor(float64(n.win.Y+n.win.ContentOffsetY) + y*n.win.Scale))
 	return sx, sy
 }
 

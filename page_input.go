@@ -23,6 +23,16 @@ func (p *Page) initInput() {
 				Scale: p.cfg.nativeWindow.Scale,
 			}
 		}
+		// Auto-detect chrome chrome offset (title bar + tabs + omnibox) so
+		// CSS (0,0) — page content origin — maps to the right screen pixel
+		// instead of landing on the address bar. Best-effort: silent fallback
+		// to (0,0) outside Windows or before a window handle is reachable.
+		if p.browser != nil && t == input.TypeNative {
+			if ox, oy, err := p.browser.ContentOffset(); err == nil {
+				win.ContentOffsetX = ox
+				win.ContentOffsetY = oy
+			}
+		}
 		p.backend = input.New(t, input.Config{Window: win})
 		profile := input.ProfileHuman
 		if p.cfg != nil {

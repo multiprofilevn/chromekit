@@ -13,3 +13,6 @@ func (b *Browser) HWND() (uintptr, error) { return 0, ErrNativeNotSupported }
 // Focus is unsupported outside Windows; native input requires platform-specific
 // foreground-window primitives that chromekit only ships for Windows today.
 func (b *Browser) Focus(_ context.Context) error { return ErrNativeNotSupported }
+
+// ContentOffset is unsupported outside Windows.
+func (b *Browser) ContentOffset() (int, int, error) { return 0, 0, ErrNativeNotSupported }

@@ -90,12 +90,13 @@ func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 	for _, t := range targets {
 		if t.ID == primaryID {
 			p := &Page{
-				id:     primaryID,
-				ctx:    b.ctx,
-				cancel: b.cancel,
-				log:    b.log,
-				cfg:    b.cfg,
-				index:  b.pageCount,
+				id:      primaryID,
+				ctx:     b.ctx,
+				cancel:  b.cancel,
+				log:     b.log,
+				cfg:     b.cfg,
+				browser: b,
+				index:   b.pageCount,
 			}
 			b.pages = append(b.pages, p)
 			b.pageCount++
@@ -104,12 +105,13 @@ func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 		}
 		ctx, cancel := chromedp.NewContext(b.ctx, chromedp.WithTargetID(target.ID(t.ID)))
 		p := &Page{
-			id:     t.ID,
-			ctx:    ctx,
-			cancel: cancel,
-			log:    b.log,
-			cfg:    b.cfg,
-			index:  b.pageCount,
+			id:      t.ID,
+			ctx:     ctx,
+			cancel:  cancel,
+			log:     b.log,
+			cfg:     b.cfg,
+			browser: b,
+			index:   b.pageCount,
 		}
 		b.pages = append(b.pages, p)
 		b.pageCount++

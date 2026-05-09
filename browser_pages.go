@@ -29,12 +29,13 @@ func (b *Browser) NewPage() (*Page, error) {
 	b.pagesMu.Lock()
 	defer b.pagesMu.Unlock()
 	p := &Page{
-		id:     string(tid),
-		ctx:    pageCtx,
-		cancel: pageCancel,
-		log:    b.log,
-		cfg:    b.cfg,
-		index:  b.pageCount,
+		id:      string(tid),
+		ctx:     pageCtx,
+		cancel:  pageCancel,
+		log:     b.log,
+		cfg:     b.cfg,
+		browser: b,
+		index:   b.pageCount,
 	}
 	b.pages = append(b.pages, p)
 	b.pageCount++
