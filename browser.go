@@ -45,7 +45,12 @@ type Browser struct {
 
 // Launch starts Chrome with the given options and opens the first blank page.
 // Caller MUST defer b.Close() to avoid leaking the Chrome process.
-func Launch(opts ...Option) (*Browser, error) {
+//
+// chromePath is the absolute path to the Chrome / Chromium binary. Pass an
+// empty string to fall back to chromedp's default `exec.LookPath("chrome")`,
+// which often fails on Windows where chrome.exe is not on PATH — pass the
+// real path explicitly when you can.
+func Launch(chromePath string, opts ...Option) (*Browser, error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(cfg)
@@ -55,7 +60,7 @@ func Launch(opts ...Option) (*Browser, error) {
 		return nil, fmt.Errorf("%w: native input requires a visible window (headless=false)", ErrInvalidConfig)
 	}
 
-	allocOpts := buildAllocatorOptions(cfg)
+	allocOpts := buildAllocatorOptions(chromePath, cfg)
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), allocOpts...)
 
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(cfg.logger.Debugf))
@@ -79,8 +84,13 @@ func Launch(opts ...Option) (*Browser, error) {
 	return b, nil
 }
 
-func buildAllocatorOptions(cfg *config) []chromedp.ExecAllocatorOption {
+func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAllocatorOption {
 	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+	if chromePath != "" {
+		// chromedp.ExecPath overrides the default exec.LookPath("chrome").
+		// Place after defaults so it wins ordering-wise.
+		opts = append(opts, chromedp.ExecPath(chromePath))
+	}
 	opts = append(opts, chromedp.Flag("headless", cfg.headless))
 	if cfg.userDataDir != "" {
 		opts = append(opts, chromedp.UserDataDir(cfg.userDataDir))

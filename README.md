@@ -45,10 +45,16 @@ func main() {
 }
 ```
 
-Use `Launch` instead if you want chromekit to spawn Chrome itself:
+Use `Launch` instead if you want chromekit to spawn Chrome itself. The first
+arg is the absolute path to the Chrome / Chromium binary; pass `""` to fall
+back to chromedp's default `exec.LookPath("chrome")` (often fails on Windows
+where chrome.exe is not on PATH):
 
 ```go
-b, _ := chromekit.Launch(chromekit.WithHeadless(false))
+b, _ := chromekit.Launch(
+    `C:\Program Files\Google\Chrome\Application\chrome.exe`,
+    chromekit.WithHeadless(false),
+)
 ```
 
 `Connect` reuses the user's tabs and never kills Chrome on `Close()`. `Launch` owns the process and shuts it down.
@@ -58,7 +64,7 @@ b, _ := chromekit.Launch(chromekit.WithHeadless(false))
 | Layer    | Method                                        | What it does                              |
 |----------|-----------------------------------------------|-------------------------------------------|
 | Browser  | `Connect(port, opts ...Option)`                | attach to a Chrome already running on the debug port |
-| Browser  | `Launch(opts ...Option)`                       | spawn a new Chrome process                |
+| Browser  | `Launch(chromePath, opts ...Option)`           | spawn a new Chrome process at chromePath (or `""` for default lookup) |
 | Browser  | `NewPage()` / `Pages()` / `Current()`          | manage tabs                               |
 | Browser  | `SwitchPageByIndex/URL/Origin`                 | switch active tab                         |
 | Browser  | `ClosePage(id)` / `Close()`                    | clean teardown                            |
