@@ -1,8 +1,10 @@
 package chromekit
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 )
 
@@ -52,6 +54,58 @@ func (p *Page) Screenshot() ([]byte, error) {
 		return nil, fmt.Errorf("%w: screenshot: %s", ErrEvaluate, err.Error())
 	}
 	return buf, nil
+}
+
+// ScreenshotClip captures a viewport region as PNG. Coordinates are CSS pixels
+// relative to the viewport top-left.
+func (p *Page) ScreenshotClip(x, y, w, h float64) ([]byte, error) {
+	if err := p.alive(); err != nil {
+		return nil, err
+	}
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("%w: clip width/height must be > 0", ErrInvalidConfig)
+	}
+	var buf []byte
+	err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		out, err := page.CaptureScreenshot().
+			WithClip(&page.Viewport{X: x, Y: y, Width: w, Height: h, Scale: 1}).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		buf = out
+		return nil
+	}))
+	if err != nil {
+		return nil, fmt.Errorf("%w: screenshot clip: %s", ErrEvaluate, err.Error())
+	}
+	return buf, nil
+}
+
+// ScreenshotElement captures the bounding box of the element matching sel.
+// Scrolls the element into view first when off-screen.
+func (p *Page) ScreenshotElement(selector string) ([]byte, error) {
+	if err := p.alive(); err != nil {
+		return nil, err
+	}
+	if err := p.WaitForSelector(selector, 0); err != nil {
+		return nil, err
+	}
+	if err := p.ScrollIntoView(selector); err != nil {
+		return nil, err
+	}
+	node, err := p.QuerySelector(selector, 0)
+	if err != nil {
+		return nil, err
+	}
+	box, err := p.BoundingBox(node)
+	if err != nil {
+		return nil, err
+	}
+	if box.Width <= 0 || box.Height <= 0 {
+		return nil, fmt.Errorf("%w: zero-size element %q", ErrEvaluate, selector)
+	}
+	return p.ScreenshotClip(box.Left, box.Top, box.Width, box.Height)
 }
 
 // FullScreenshot captures the full page (scrolling) as PNG with quality 0-100.

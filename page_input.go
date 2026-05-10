@@ -49,26 +49,9 @@ func (p *Page) initInput() {
 	})
 }
 
-// MoveTo glides the cursor to (x, y) in viewport CSS pixels.
-func (p *Page) MoveTo(x, y float64) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
-	p.initInput()
-	return p.cursor.MoveTo(p.ctx, x, y)
-}
-
-// ClickAt clicks at (x, y) with the left button.
-func (p *Page) ClickAt(x, y float64) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
-	p.initInput()
-	return p.cursor.Click(p.ctx, x, y, input.MouseLeft)
-}
-
 // ClickElement queries the selector, picks a random point inside its
 // bounding box (with a small inset so we don't graze the edge) and clicks.
+// Selector-based high-level shortcut — kept on Page deliberately.
 func (p *Page) ClickElement(selector string) error {
 	if err := p.alive(); err != nil {
 		return err
@@ -90,42 +73,6 @@ func (p *Page) ClickElement(selector string) error {
 	}
 	x := box.Left + inset + rand.Float64()*(box.Width-inset*2)
 	y := box.Top + inset + rand.Float64()*(box.Height-inset*2)
-	return p.ClickAt(x, y)
-}
-
-// TypeHuman types each rune with random delays. Best when a real user input
-// is being mimicked (e.g. forms watched by anti-bot scripts).
-func (p *Page) TypeHuman(text string) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
 	p.initInput()
-	return p.keyboard.Type(p.ctx, text)
-}
-
-// TypeFast pastes the text in one event (CDP) or per-rune without delay (native).
-func (p *Page) TypeFast(text string) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
-	p.initInput()
-	return p.keyboard.TypeFast(p.ctx, text)
-}
-
-// Tap dispatches a touch tap at (x, y).
-func (p *Page) Tap(x, y float64) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
-	p.initInput()
-	return p.touch.Tap(p.ctx, x, y)
-}
-
-// Scroll dispatches a wheel event with the given deltas.
-func (p *Page) Scroll(deltaX, deltaY float64) error {
-	if err := p.alive(); err != nil {
-		return err
-	}
-	p.initInput()
-	return p.cursor.Scroll(p.ctx, deltaX, deltaY)
+	return p.cursor.Click(p.ctx, x, y, input.MouseLeft)
 }

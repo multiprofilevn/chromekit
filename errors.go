@@ -10,4 +10,6 @@ var (
 	ErrEvaluate           = errors.New("chromekit: evaluate failed")
 	ErrNativeNotSupported = errors.New("chromekit: native input not supported on this platform")
 	ErrInvalidConfig      = errors.New("chromekit: invalid config")
+	ErrFrameDetached      = errors.New("chromekit: frame detached")
+	ErrDownloadCanceled   = errors.New("chromekit: download canceled")
 )

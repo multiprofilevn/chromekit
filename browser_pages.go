@@ -40,6 +40,15 @@ func (b *Browser) NewPage() (*Page, error) {
 	b.pages = append(b.pages, p)
 	b.pageCount++
 	b.current = p
+	// Sub-namespace API holders. Plain pointer wrappers; zero alloc per call.
+	p.cookiesAPI = &CookiesAPI{p: p}
+	p.mouseAPI = &MouseAPI{p: p}
+	p.keyboardAPI = &KeyboardAPI{p: p}
+	p.downloadsAPI = &DownloadsAPI{p: p}
+	// Wire the cross-cutting listener (dialog auto-dismiss, console relay,
+	// download progress) up front so an alert() never hangs the tab even if
+	// the caller never registers a handler. Idempotent.
+	p.initListeners()
 	return p, nil
 }
 

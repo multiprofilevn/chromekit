@@ -27,7 +27,37 @@ type Page struct {
 	cursor    *input.Cursor
 	keyboard  *input.Keyboard
 	touch     *input.TouchScreen
+
+	listenersOnce  sync.Once
+	listenerMu     sync.RWMutex
+	dialogHandler  func(DialogEvent) DialogAction
+	consoleHandler func(ConsoleEvent)
+	downloadCh     chan downloadEvent
+
+	frameMu       sync.RWMutex
+	frameCtxByID  map[string]int64 // frameID → execution context ID (latest)
+	framesCache   []*Frame
+	framesDirty   bool
+
+	cookiesAPI   *CookiesAPI
+	mouseAPI     *MouseAPI
+	keyboardAPI  *KeyboardAPI
+	downloadsAPI *DownloadsAPI
 }
+
+// Cookies returns the cookie operations namespace for this page.
+func (p *Page) Cookies() *CookiesAPI { return p.cookiesAPI }
+
+// Mouse returns the low-level mouse operations namespace for this page.
+// High-level selector-based shortcuts (Click, ClickElement) stay on Page.
+func (p *Page) Mouse() *MouseAPI { return p.mouseAPI }
+
+// Keyboard returns the keyboard operations namespace for this page.
+// The selector-based shortcut p.Type(sel, text) stays on Page.
+func (p *Page) Keyboard() *KeyboardAPI { return p.keyboardAPI }
+
+// Downloads returns the download operations namespace for this page.
+func (p *Page) Downloads() *DownloadsAPI { return p.downloadsAPI }
 
 // ID returns the chromedp target ID for the page.
 func (p *Page) ID() string { return p.id }

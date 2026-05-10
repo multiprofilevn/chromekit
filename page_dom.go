@@ -100,6 +100,42 @@ func (p *Page) GetText(selector string) (string, error) {
 	return s, nil
 }
 
+// boxModelByNodeID is BoundingBox keyed by raw NodeID (instead of *cdp.Node).
+// Used by frame-level helpers that hold node IDs from a remote query.
+func (p *Page) boxModelByNodeID(id cdp.NodeID) (BoundingBox, error) {
+	c := chromedp.FromContext(p.ctx)
+	box, err := dom.GetBoxModel().WithNodeID(id).Do(cdp.WithExecutor(p.ctx, c.Target))
+	if err != nil {
+		return BoundingBox{}, fmt.Errorf("%w: box model: %s", ErrEvaluate, err.Error())
+	}
+	m := box.Margin
+	return BoundingBox{
+		X: m[0], Y: m[1],
+		Width: m[2] - m[0], Height: m[5] - m[1],
+		Left: m[0], Right: m[2],
+		Top: m[1], Bottom: m[5],
+	}, nil
+}
+
+// ScrollIntoView scrolls the first element matching selector to the viewport
+// center. No-op if the element is already visible.
+func (p *Page) ScrollIntoView(selector string) error {
+	if err := p.alive(); err != nil {
+		return err
+	}
+	js := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%q);
+		if (!el) throw new Error('selector not found: ' + %q);
+		el.scrollIntoView({block: 'center', inline: 'center'});
+		return true;
+	})()`, selector, selector)
+	var ok bool
+	if err := chromedp.Run(p.ctx, chromedp.Evaluate(js, &ok)); err != nil {
+		return fmt.Errorf("%w: scroll into view %q: %s", ErrEvaluate, selector, err.Error())
+	}
+	return nil
+}
+
 // GetAttribute returns the value of attribute on the first element matching selector.
 func (p *Page) GetAttribute(selector, attribute string) (string, error) {
 	if err := p.alive(); err != nil {

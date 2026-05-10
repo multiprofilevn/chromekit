@@ -39,7 +39,7 @@ func main() {
 	if err := p.ClickElement("input[name=q]"); err != nil {
 		log.Printf("click search box: %v", err)
 	}
-	if err := p.TypeHuman("chromekit"); err != nil {
+	if err := p.Keyboard().Type("chromekit"); err != nil {
 		log.Printf("type: %v", err)
 	}
 	time.Sleep(2 * time.Second)

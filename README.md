@@ -68,15 +68,21 @@ b, _ := chromekit.Launch(
 | Browser  | `NewPage()` / `Pages()` / `Current()`          | manage tabs                               |
 | Browser  | `SwitchPageByIndex/URL/Origin`                 | switch active tab                         |
 | Browser  | `ClosePage(id)` / `Close()`                    | clean teardown                            |
-| Page     | `Navigate(url, timeout)` / `Reload` / `GoBack` | navigation                                |
-| Page     | `WaitForReady(timeout)` / `WaitForSelector`    | sync points                               |
-| Page     | `Click(selector)` / `Type(selector, text)`     | basic CDP click / type                    |
-| Page     | `ClickElement(selector)` / `TypeHuman(text)`   | human-like click / typing with delays     |
-| Page     | `MoveTo(x, y)` / `ClickAt(x, y)` / `Scroll`    | low-level cursor control                  |
-| Page     | `Tap(x, y)`                                    | touch tap                                 |
-| Page     | `Evaluate(expr, out)`                          | run JS, decode result                     |
-| Page     | `Screenshot()` / `FullScreenshot(quality)`     | PNG capture                               |
-| Page     | `QuerySelector` / `BoundingBox` / `GetText`    | DOM helpers                               |
+| Page     | `Navigate(url, timeout)` / `Reload` / `GoBack` / `GoForward` | navigation             |
+| Page     | `WaitForReady` / `WaitForSelector` / `WaitForChangeURL` / `WaitForFunction` | sync |
+| Page     | `Click(sel)` / `ClickElement(sel)` / `Type(sel, text)` / `Hover(sel)` | high-level shortcut |
+| Page     | `Evaluate(expr, out)` / `EvalSelector(sel, fn, out)` / `EvalSelectorAll`   | run JS |
+| Page     | `Screenshot()` / `FullScreenshot(q)` / `ScreenshotClip(x,y,w,h)` / `ScreenshotElement(sel)` | PNG capture |
+| Page     | `QuerySelector` / `QuerySelectorAll` / `BoundingBox` / `GetText` / `GetAttribute` / `ScrollIntoView` | DOM |
+| Page     | `SetExtraHeaders(map)` / `SetInputFiles(sel, paths...)` | request shaping / upload   |
+| Page     | `OnDialog(handler)` / `OnConsole(handler)`     | event listeners                          |
+| Page     | `Frames()` / `MainFrame()` / `FrameByURL(re)` / `FrameByName(name)` | iframe access      |
+| Page     | `Cookies()` → `Get/Set/Delete/Clear`           | cookie namespace                          |
+| Page     | `Mouse()` → `MoveTo/ClickAt/Scroll/Tap/Hover/DoubleClick/RightClick/Drag/DragAndDrop` | mouse |
+| Page     | `Keyboard()` → `Press/Down/Up/Type/TypeFast`   | keyboard namespace                        |
+| Page     | `Storage().Local()/Session()` → `Get/Set/Remove/Clear` | web storage                       |
+| Page     | `Downloads()` → `SetPath/Wait`                 | download interception                     |
+| Browser  | `GrantPermissions(origin, perms...)` / `ResetPermissions()` | permission overrides         |
 
 ## Options
 
