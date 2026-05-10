@@ -54,6 +54,18 @@ func (k *Keyboard) Combo(ctx context.Context, vk uint16, mods Modifier) error {
 	return k.backend.KeyCombo(ctx, vk, mods)
 }
 
+// ClearInput selects all (Ctrl+A) then deletes — the keystroke flow a human
+// uses to wipe an input field. Works on both backends because Backend.KeyCombo
+// is implemented for each. Caller is responsible for ensuring the target
+// field has focus before calling; otherwise the select-all hits whatever the
+// browser considers active.
+func (k *Keyboard) ClearInput(ctx context.Context) error {
+	if err := k.backend.KeyCombo(ctx, VKA, ModCtrl); err != nil {
+		return err
+	}
+	return k.backend.KeyCombo(ctx, VKDelete, 0)
+}
+
 func (k *Keyboard) sleep() {
 	min := int(k.MinDelay / time.Millisecond)
 	max := int(k.MaxDelay / time.Millisecond)

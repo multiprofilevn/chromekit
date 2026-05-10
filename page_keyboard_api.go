@@ -96,16 +96,41 @@ func (k *KeyboardAPI) TypeFast(text string) error {
 	return k.p.keyboard.TypeFast(k.p.ctx, text)
 }
 
+// ClearInput wipes the focused input via Ctrl+A then Delete. If a selector is
+// passed, focuses that element first via chromedp.Focus (DOM-level), so the
+// keystrokes target the right field. Without a selector the caller must
+// guarantee something useful is focused — otherwise the select-all hits the
+// browser's current active element (often <body>) and Delete is a no-op or
+// destructive elsewhere.
+func (k *KeyboardAPI) ClearInput(selector ...string) error {
+	if err := k.p.alive(); err != nil {
+		return err
+	}
+	k.p.initInput()
+	if len(selector) > 0 && selector[0] != "" {
+		sel := selector[0]
+		if err := chromedp.Run(k.p.ctx, chromedp.Focus(sel, chromedp.ByQuery)); err != nil {
+			return fmt.Errorf("%w: focus %q: %s", ErrEvaluate, sel, err.Error())
+		}
+	}
+	return k.p.keyboard.ClearInput(k.p.ctx)
+}
+
 func dispatchKey(ctx context.Context, t cdpinput.KeyType, key string, mod int64) error {
 	ev := cdpinput.DispatchKeyEvent(t).WithModifiers(cdpinput.Modifier(mod))
+	// chromedp issue #1384: WithText on a KeyDown carrying modifiers makes
+	// Chrome insert the character (e.g. "a" gets typed) in addition to firing
+	// the accelerator (Ctrl+A select-all). Suppress text whenever a modifier
+	// is held so shortcuts behave like real keystrokes.
+	allowText := t == cdpinput.KeyDown && mod == 0
 	if spec, ok := keyMap[key]; ok {
 		ev = ev.WithKey(spec.key).WithCode(spec.code).WithWindowsVirtualKeyCode(spec.vk)
-		if spec.text != "" && t == cdpinput.KeyDown {
+		if allowText && spec.text != "" {
 			ev = ev.WithText(spec.text)
 		}
 	} else {
 		ev = ev.WithKey(key)
-		if t == cdpinput.KeyDown && len(key) == 1 {
+		if allowText && len(key) == 1 {
 			ev = ev.WithText(key)
 		}
 	}
