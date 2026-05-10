@@ -43,7 +43,9 @@ chromekit/
 ├── page_mouse_api.go (154 LOC)
 │   Mouse() namespace — MoveTo / ClickAt / Scroll / Tap / Hover / DoubleClick / RightClick / Drag / DragAndDrop
 ├── page_keyboard_api.go (138 LOC)
-│   Keyboard() namespace — Press / Down / Up / Type / TypeFast
+│   Keyboard() namespace — Press / Down / Up / Type / TypeFast / TypeHuman
+├── page_type_selector.go (123 LOC)
+│   Keyboard().TypeSelector(selector, text, cfg) — type via TypeHuman + verify via .value/.innerText/.textContent
 ├── page_downloads_api.go (87 LOC)
 │   Downloads() namespace — SetPath(dir) / Wait()
 ├── page_headers.go
@@ -53,7 +55,7 @@ chromekit/
 ├── frame.go (289 LOC)
 │   Frames / MainFrame / FrameByURL / FrameByName — iframe navigation
 ├── errors.go
-│   Sentinel error vars (ErrContextCanceled, ErrPageNotFound, ErrNavigate, ErrTimeout, ErrEvaluate, ErrNativeNotSupported, ErrInvalidConfig, ErrFrameDetached, ErrDownloadCanceled)
+│   Sentinel error vars (ErrContextCanceled, ErrPageNotFound, ErrNavigate, ErrTimeout, ErrEvaluate, ErrNativeNotSupported, ErrInvalidConfig, ErrFrameDetached, ErrDownloadCanceled, ErrTypeSelectorMismatch)
 ├── options.go (108 LOC)
 │   Option func, BackendType enum, CursorProfile enum, Config struct, With* constructors
 ├── logger.go
@@ -65,7 +67,11 @@ chromekit/
 │   └── native/main.go — Windows native input example
 ├── input/ (subpackage, ~1k LOC)
 │   ├── backend.go (102 LOC)
-│   │   Backend interface — Click / Type / MoveTo / Scroll / DragTo / KeyDown / KeyUp / Scroll / Tap
+│   │   Backend interface — Click / Type / MoveTo / Scroll / DragTo / KeyDown / KeyUp / Scroll / Tap / KeyChar / KeyCombo
+│   ├── keyboard_human.go (100 LOC)
+│   │   Keyboard.TypeHuman(ctx, text, cfg) — slow jittered typing with configurable MistakeRate + CorrectionPause
+│   ├── keyboard_human_test.go
+│   │   13 unit tests covering mistake simulation, typo correction, empty input, uppercase preservation
 │   ├── backend_cdp.go
 │   │   CDP impl (uses chromedp for all input)
 │   ├── backend_native_windows.go (311 LOC)
@@ -163,10 +169,10 @@ chromekit/
 - `MoveTo(x, y int) error`
 - `Scroll(x, y, dx, dy int, duration time.Duration) error`
 - `DragTo(x, y int, button MouseButton, duration time.Duration) error`
-- `KeyDown(key *input.Key) error`
-- `KeyUp(key *input.Key) error`
-- `Type(text string) error`
-- `Tap(x, y int) error`
+- `KeyChar(ctx context.Context, ch rune) error` — type single rune via backend
+- `KeyCombo(ctx context.Context, vk uint16, mods Modifier) error` — press key with modifiers (for Ctrl+A, Enter, etc.)
+- `InsertText(ctx context.Context, text string) error` — bulk-insert text (backend-dependent)
+- `Tap(x, y int) error` — touch event
 
 ## External dependencies
 

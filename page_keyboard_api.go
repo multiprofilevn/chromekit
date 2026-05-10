@@ -86,6 +86,17 @@ func (k *KeyboardAPI) Type(text string) error {
 	return k.p.keyboard.Type(k.p.ctx, text)
 }
 
+// TypeHuman types text with slower pacing than Type and a configurable
+// per-character chance to mistype, pause, backspace, then type the correct
+// rune. Pass at most one HumanTypeConfig — defaults are applied per field.
+func (k *KeyboardAPI) TypeHuman(text string, cfg ...input.HumanTypeConfig) error {
+	if err := k.p.alive(); err != nil {
+		return err
+	}
+	k.p.initInput()
+	return k.p.keyboard.TypeHuman(k.p.ctx, text, cfg...)
+}
+
 // TypeFast skips the random delay loop and asks the backend to bulk-insert.
 // CDP backend pastes in one event; native backend still goes per-rune.
 func (k *KeyboardAPI) TypeFast(text string) error {

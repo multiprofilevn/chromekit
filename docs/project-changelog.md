@@ -4,7 +4,28 @@ All notable changes to the chromekit library are documented here. Pre-1.0, semve
 
 ## [Unreleased]
 
-(No unreleased changes. All work is on active branches under development.)
+### Added
+
+#### Human-like Keyboard Input
+- **human typing with jittered cadence** (`feat(keyboard): add TypeHuman for human-like typing`)
+  - `KeyboardAPI.TypeHuman(text, cfg ...input.HumanTypeConfig)` types at 80–220ms per character
+  - Per-character typo simulation (default 5% chance): picks QWERTY-adjacent wrong key → `CorrectionPause` (250ms) → backspace via `VKBackspace` → retype correct character
+  - Config fields: `MinDelay`, `MaxDelay`, `MistakeRate`, `CorrectionPause`, injectable `*rand.Rand` for determinism
+  - Honors context cancellation between keystrokes
+
+- **selector-based typing with round-trip verification** (`feat(page): add TypeSelector for form filling`)
+  - `KeyboardAPI.TypeSelector(selector, text, cfg ...TypeSelectorConfig)` focuses element, types via TypeHuman, verifies value matches
+  - Reads value via multi-branch JS: `.value` (input/textarea) → `.innerText` (contenteditable) → `.textContent` (fallback)
+  - Retries up to `MaxAttempts` (default 5) on mismatch: clears field and retypes
+  - `Strict=true` returns `ErrTypeSelectorMismatch` on final failure; `Strict=false` swallows mismatch (for async-reformatting fields like phone masks)
+  - TrimSpace comparison (whitespace-insensitive matching)
+
+#### API additions
+- `input.VKBackspace const uint16 = 0x08` — virtual-key code for backspace (Win32)
+- `input.HumanTypeConfig struct` — configure TypeHuman timing + mistake rate
+- `input.Keyboard.TypeHuman(ctx, text, cfg)` — low-level human typing dispatch
+- `TypeSelectorConfig struct` — configure TypeSelector retry + strictness + per-char cadence
+- `ErrTypeSelectorMismatch error` — returned when Strict=true and value mismatches after MaxAttempts
 
 ---
 

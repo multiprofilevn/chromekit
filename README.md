@@ -79,7 +79,8 @@ b, _ := chromekit.Launch(
 | Page     | `Frames()` / `MainFrame()` / `FrameByURL(re)` / `FrameByName(name)` | iframe access      |
 | Page     | `Cookies()` → `Get/Set/Delete/Clear`           | cookie namespace                          |
 | Page     | `Mouse()` → `MoveTo/ClickAt/Scroll/Tap/Hover/DoubleClick/RightClick/Drag/DragAndDrop` | mouse |
-| Page     | `Keyboard()` → `Press/Down/Up/Type/TypeFast`   | keyboard namespace                        |
+| Page     | `Keyboard()` → `Press/Down/Up/Type/TypeFast/TypeHuman` | keyboard namespace                        |
+| Page     | `Keyboard().TypeSelector(sel, text, cfg...)` | type text via TypeHuman, verify round-trip (Strict/MaxAttempts)      |
 | Page     | `Storage().Local()/Session()` → `Get/Set/Remove/Clear` | web storage                       |
 | Page     | `Downloads()` → `SetPath/Wait`                 | download interception                     |
 | Browser  | `GrantPermissions(origin, perms...)` / `ResetPermissions()` | permission overrides         |

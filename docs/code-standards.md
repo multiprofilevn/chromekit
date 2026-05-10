@@ -60,7 +60,7 @@ page.Frames() // no (), returns slice
 **Namespace types**:
 - `CookiesAPI` — Get / Set / Delete / Clear
 - `MouseAPI` — MoveTo / ClickAt / Scroll / Tap / Hover / DoubleClick / RightClick / Drag / DragAndDrop
-- `KeyboardAPI` — Press / Down / Up / Type / TypeFast
+- `KeyboardAPI` — Press / Down / Up / Type / TypeFast / TypeHuman / TypeSelector
 - `DownloadsAPI` — SetPath / Wait
 - `StorageAPI` → `.Local()` / `.Session()` → Get / Set / Remove / Clear
 

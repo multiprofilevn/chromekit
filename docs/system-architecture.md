@@ -229,10 +229,54 @@ Backend interface hides implementation. Page doesn't know if it's using chromedp
 - `MoveTo(x, y)` — human-like path via cursor.MoveTo (Bezier + ease-in-out)
 - `Scroll(x, y, dx, dy, duration)` — wheel event or screen scroll
 - `DragTo(x, y, button, duration)`
-- `KeyDown(key)`, `KeyUp(key)`, `Type(text)` — key codes
+- `KeyChar(ch rune)`, `KeyCombo(vk, mods)`, `InsertText(text)` — keyboard dispatch
 - `Tap(x, y)` — touch event
 
 Native backend uses `input.Cursor` (Bezier path planner) + OS syscalls. CDP backend is direct chromedp dispatch.
+
+## Keyboard input flow: TypeSelector
+
+`KeyboardAPI.TypeSelector(selector, text, cfg)` implements a form-filling pipeline:
+
+```
+User code: p.Keyboard().TypeSelector("input.email", "test@example.com")
+                    │
+                    ▼
+          ┌─────────────────────────┐
+          │ TypeSelector (loop)     │
+          │ attempt = 1..MaxAttempts│
+          └────────┬────────────────┘
+                   │
+          1. Focus selector
+             ├─ Try MouseAPI.FocusElement (click focus)
+             └─ Fallback JS: el.focus()
+                   │
+          2. Clear input (Ctrl+A + Delete)
+                   │
+          3. Type text via TypeHuman
+             ├─ random jitter 80-220ms per char
+             ├─ 5% mistake rate (typo + backspace + retype)
+             └─ honors context cancellation
+                   │
+          4. Read value via multi-branch JS
+             ├─ .value (input/textarea)
+             ├─ .innerText (contenteditable)
+             └─ .textContent (fallback)
+                   │
+          5. Verify (TrimSpace compare)
+             ├─ Match → return nil
+             └─ Mismatch + attempt < MaxAttempts → goto 2 (retry)
+                   │
+        Strict=true:  return ErrTypeSelectorMismatch
+        Strict=false: return nil (swallow mismatch)
+```
+
+Config options:
+- `Strict bool` — if true, final mismatch returns error; false swallows it (for async-reformatting fields like phone masks)
+- `MaxAttempts int` — total attempts before giving up (default 5)
+- `Human input.HumanTypeConfig` — per-char timing + mistake rate override
+
+Use case: filling form fields where value lags behind keystrokes or JavaScript reformats input (currency, phone numbers, etc.).
 
 ## Configuration & options
 

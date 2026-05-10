@@ -24,7 +24,8 @@ type vkSpec struct {
 // entry here will cause cdpBackend.KeyCombo to return an "unsupported vk"
 // error — by design, so the mapping stays explicit.
 var vkToCDPKey = map[uint16]vkSpec{
-	VKReturn: {key: "Enter", code: "Enter", text: "\r", vkCode: 13},
+	VKReturn:    {key: "Enter", code: "Enter", text: "\r", vkCode: 13},
+	VKBackspace: {key: "Backspace", code: "Backspace", vkCode: 8},
 	VKEscape: {key: "Escape", code: "Escape", vkCode: 27},
 	VKEnd:    {key: "End", code: "End", vkCode: 35},
 	VKHome:   {key: "Home", code: "Home", vkCode: 36},

@@ -63,8 +63,9 @@ const (
 // Virtual-key codes for the most common non-character keys used by KeyCombo.
 // Match Win32 VK_* values — the native backend forwards them as-is.
 const (
-	VKReturn uint16 = 0x0D
-	VKEscape uint16 = 0x1B
+	VKReturn    uint16 = 0x0D
+	VKBackspace uint16 = 0x08
+	VKEscape    uint16 = 0x1B
 	VKEnd    uint16 = 0x23
 	VKHome   uint16 = 0x24
 	VKDelete uint16 = 0x2E
