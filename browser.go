@@ -148,6 +148,28 @@ func (b *Browser) Close() {
 	}
 }
 
+// Done returns a channel that closes when the browser context is cancelled —
+// either via Close() or because the underlying chromedp context died (chrome
+// process exited / crashed). Caller can <-Done() to wait for chrome lifetime.
+func (b *Browser) Done() <-chan struct{} {
+	if b == nil || b.ctx == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return b.ctx.Done()
+}
+
+// PID returns the chrome browser process id captured at Launch. 0 for the
+// Connect path (chromekit didn't spawn the process — caller may know the pid
+// from elsewhere).
+func (b *Browser) PID() uint32 {
+	if b == nil {
+		return 0
+	}
+	return b.pid
+}
+
 // Current returns the active page (last opened or last switched-to).
 func (b *Browser) Current() *Page {
 	b.pagesMu.RLock()
