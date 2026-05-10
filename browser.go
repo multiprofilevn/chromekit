@@ -181,6 +181,17 @@ func (b *Browser) PID() uint32 {
 	return b.pid
 }
 
+// InputBackend reports which input backend this Browser was launched with.
+// Used by orchestrators (e.g. chromefleet) that want to branch behavior —
+// native input requires OS-cursor synchronisation (drift checks, focus),
+// CDP input does not.
+func (b *Browser) InputBackend() BackendType {
+	if b == nil || b.cfg == nil {
+		return BackendCDP
+	}
+	return b.cfg.inputBackend
+}
+
 // Current returns the active page (last opened or last switched-to).
 func (b *Browser) Current() *Page {
 	b.pagesMu.RLock()
