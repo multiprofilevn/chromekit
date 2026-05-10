@@ -93,7 +93,12 @@ func Launch(chromePath string, opts ...Option) (*Browser, error) {
 }
 
 func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAllocatorOption {
-	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
+	// chromekit intentionally does NOT prepend chromedp.DefaultExecAllocatorOptions.
+	// Callers own the entire flag list — per-engine profiles (gologin / gpmlogin /
+	// stock Chrome) need wildly different sets, and silent defaults made it
+	// impossible to match upstream-tool flags (e.g. gologin's minimal arg set).
+	// If you want the chromedp defaults, append them yourself before Launch.
+	opts := []chromedp.ExecAllocatorOption{}
 	if chromePath != "" {
 		// chromedp.ExecPath overrides the default exec.LookPath("chrome").
 		// Place after defaults so it wins ordering-wise.
