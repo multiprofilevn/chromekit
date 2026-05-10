@@ -91,35 +91,61 @@ func newNative(cfg Config) Backend {
 }
 
 func (n *nativeBackend) toScreen(x, y float64) (int32, int32) {
-	// Window.X/Y is the window's screen top-left. ContentOffsetX/Y is the
-	// chrome-chrome offset (title bar + tabs + omnibox). CSS (x, y) is
-	// content-relative and gets DPI-scaled before being added — the offset
-	// is already in raw screen pixels and is added without scaling.
-	sx := int32(math.Floor(float64(n.win.X+n.win.ContentOffsetX) + x*n.win.Scale))
-	sy := int32(math.Floor(float64(n.win.Y+n.win.ContentOffsetY) + y*n.win.Scale))
+	sx, sy := cssToScreen(x, y, n.win)
+	return int32(math.Floor(sx)), int32(math.Floor(sy))
+}
+
+// cssToScreen / screenToCSS are pure inverse transforms between CSS
+// content-origin coords and absolute screen pixels. Window.X/Y is the
+// window's screen top-left; ContentOffsetX/Y is the chrome-chrome offset
+// (title bar + tabs + omnibox) in raw screen pixels (NOT scaled). CSS
+// coords are content-relative and get DPI-scaled.
+//
+// Invariant: screenToCSS(cssToScreen(x, y, win), win) == (x, y) — exact
+// modulo the int32 floor in toScreen. Asymmetry between these two has
+// caused visible cursor "teleport-back-then-glide" artefacts (the
+// chromefleet click sequence calls MoveTo twice; the second one seeds its
+// Bezier from OSPositionCSS, so a broken inverse leaks ~ContentOffset/Scale
+// pixels of phantom drift into the path).
+func cssToScreen(x, y float64, win Window) (float64, float64) {
+	scale := win.Scale
+	if scale <= 0 {
+		scale = 1.0
+	}
+	sx := float64(win.X+win.ContentOffsetX) + x*scale
+	sy := float64(win.Y+win.ContentOffsetY) + y*scale
 	return sx, sy
+}
+
+func screenToCSS(px, py float64, win Window) (float64, float64) {
+	scale := win.Scale
+	if scale <= 0 {
+		scale = 1.0
+	}
+	cssX := (px - float64(win.X+win.ContentOffsetX)) / scale
+	cssY := (py - float64(win.Y+win.ContentOffsetY)) / scale
+	return cssX, cssY
 }
 
 // posPoint mirrors Win32 POINT.
 type posPoint struct{ X, Y int32 }
 
 // OSPositionCSS returns the current OS cursor position translated into this
-// backend's CSS coordinate space (relative to the browser window). Used by
-// Cursor.MoveTo to pick the correct start point — without this, the cursor
-// "teleports" between browsers because each Cursor instance otherwise tracks
-// only the last CSS coord it saw, not where the OS pointer physically is.
+// backend's CSS coordinate space (relative to the browser window's content
+// origin). MUST be the inverse of toScreen — both subtract Window.X/Y AND
+// ContentOffsetX/Y, then divide by Scale. If ContentOffset is dropped here,
+// the next MoveTo seeds its Bezier from a point ~ContentOffset/Scale px
+// away from where the cursor actually is → the OS cursor teleports forward
+// on the first sub-step, then animates back to target. Visible jitter on
+// the second MoveTo of any click sequence (MoveTo then ClickAt → Click
+// internally calls MoveTo again).
 func (n *nativeBackend) OSPositionCSS() (float64, float64, bool) {
 	var p posPoint
 	ok, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&p)))
 	if ok == 0 {
 		return 0, 0, false
 	}
-	scale := n.win.Scale
-	if scale <= 0 {
-		scale = 1.0
-	}
-	cssX := (float64(p.X) - float64(n.win.X)) / scale
-	cssY := (float64(p.Y) - float64(n.win.Y)) / scale
+	cssX, cssY := screenToCSS(float64(p.X), float64(p.Y), n.win)
 	return cssX, cssY, true
 }
 
