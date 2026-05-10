@@ -101,6 +101,9 @@ func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAlloca
 	for k, v := range cfg.flags {
 		opts = append(opts, chromedp.Flag(k, v))
 	}
+	if cfg.modifyCmd != nil {
+		opts = append(opts, chromedp.ModifyCmdFunc(cfg.modifyCmd))
+	}
 	return opts
 }
 

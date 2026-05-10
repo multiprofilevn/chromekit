@@ -1,5 +1,7 @@
 package chromekit
 
+import "os/exec"
+
 // BackendType selects how chromekit dispatches mouse/keyboard input.
 type BackendType int
 
@@ -41,6 +43,7 @@ type config struct {
 	nativeWindow  nativeWindow
 	cursorProfile CursorProfile
 	flags         map[string]any
+	modifyCmd     func(*exec.Cmd)
 }
 
 func defaultConfig() *config {
@@ -105,4 +108,20 @@ func WithCursorProfile(p CursorProfile) Option {
 // Stored as raw key/value; consumed by the launcher.
 func WithFlag(key string, value any) Option {
 	return func(c *config) { c.flags[key] = value }
+}
+
+// WithModifyCmd hooks the underlying *exec.Cmd before Chrome starts. Use
+// this to inject raw process args that chromedp.Flag can't express — e.g.
+// single-dash flags like `-disable-features=` for GPM-Login Chromium forks
+// that intentionally bypass the standard `--disable-features=` parser.
+//
+// The hook fires once per Launch, after chromedp builds the default arg
+// list and before exec.Cmd.Start. Mutating Cmd.Args is safe; mutating
+// Cmd.Process is not (the process hasn't started yet).
+func WithModifyCmd(fn func(*exec.Cmd)) Option {
+	return func(c *config) {
+		if fn != nil {
+			c.modifyCmd = fn
+		}
+	}
 }
