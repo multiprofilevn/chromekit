@@ -103,6 +103,7 @@ func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 			b.pages = append(b.pages, p)
 			b.pageCount++
 			b.current = p
+			wirePage(p)
 			continue
 		}
 		ctx, cancel := chromedp.NewContext(b.ctx, chromedp.WithTargetID(target.ID(t.ID)))
@@ -121,6 +122,7 @@ func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 		if b.current == nil {
 			b.current = p
 		}
+		wirePage(p)
 	}
 }
 

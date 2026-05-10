@@ -40,16 +40,27 @@ func (b *Browser) NewPage() (*Page, error) {
 	b.pages = append(b.pages, p)
 	b.pageCount++
 	b.current = p
-	// Sub-namespace API holders. Plain pointer wrappers; zero alloc per call.
+	wirePage(p)
+	return p, nil
+}
+
+// wirePage attaches the namespace API holders and starts the cross-cutting
+// listeners on a freshly constructed Page. Both NewPage and Connect's
+// attachKnownTargets MUST run this — without it page.Mouse(), .Keyboard(),
+// .Cookies(), .Downloads() return nil and panic on first call.
+func wirePage(p *Page) {
+	attachPageNamespaces(p)
+	p.initListeners()
+}
+
+// attachPageNamespaces wires only the API holder pointers — pure assignment,
+// no chromedp side-effects. Split out from wirePage so tests can assert the
+// invariant without needing a live CDP connection.
+func attachPageNamespaces(p *Page) {
 	p.cookiesAPI = &CookiesAPI{p: p}
 	p.mouseAPI = &MouseAPI{p: p}
 	p.keyboardAPI = &KeyboardAPI{p: p}
 	p.downloadsAPI = &DownloadsAPI{p: p}
-	// Wire the cross-cutting listener (dialog auto-dismiss, console relay,
-	// download progress) up front so an alert() never hangs the tab even if
-	// the caller never registers a handler. Idempotent.
-	p.initListeners()
-	return p, nil
 }
 
 // ClosePage cancels the page with the given target ID and removes it from the
