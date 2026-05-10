@@ -2,12 +2,25 @@ package chromekit
 
 import (
 	"fmt"
+	"math/rand"
+	"strconv"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"github.com/tuwibu/chromekit/input"
 )
 
 const dragSteps = 10
+
+// MOUSE_PADDING_WIDTH / MOUSE_PADDING_HEIGHT define the central fraction of
+// an element's bounding box where elementClickPoint may pick a click point.
+// 0.3 wide × 0.1 tall → clicks land in a flat horizontal strip near the
+// vertical center: human-ish jitter without drifting toward edges where
+// hit-testing can flip to a sibling. Tweak per project's tolerance.
+const (
+	MOUSE_PADDING_WIDTH  = 0.3
+	MOUSE_PADDING_HEIGHT = 0.1
+)
 
 // MouseAPI groups every mouse primitive — both raw-coordinate (low-level)
 // and selector-based extras. The high-level shortcuts p.Click(sel) and
@@ -50,10 +63,50 @@ func (m *MouseAPI) Tap(x, y float64) error {
 	return m.p.touch.Tap(m.p.ctx, x, y)
 }
 
+// Click moves the cursor to the center of the element matching selector with
+// a human-like path, then performs a left click. Different from p.Click which
+// dispatches an instant CDP click without cursor movement.
+func (m *MouseAPI) Click(selector string) error {
+	x, y, err := m.p.elementClickPoint(selector)
+	if err != nil {
+		return err
+	}
+	m.p.initInput()
+	return m.p.cursor.Click(m.p.ctx, x, y, input.MouseLeft)
+}
+
+// FocusElement scrolls the element into view, performs a human-like click on
+// it, and verifies document.activeElement landed on the target. Falls back to
+// chromedp.Focus (DOM .focus()) if the click didn't take focus — handles
+// disabled-but-focusable widgets, custom controls, and overlay-occluded
+// inputs. Returns an error only when both paths fail.
+func (m *MouseAPI) FocusElement(selector string) error {
+	if err := m.p.alive(); err != nil {
+		return err
+	}
+	// Best-effort scroll — non-scrollable layouts return an error we can ignore.
+	_ = m.p.ScrollIntoView(selector)
+	if err := m.Click(selector); err != nil {
+		return err
+	}
+	var focused bool
+	expr := fmt.Sprintf(
+		"!!document.activeElement && document.activeElement.matches(%s)",
+		strconv.Quote(selector),
+	)
+	if err := m.p.Evaluate(expr, &focused); err == nil && focused {
+		return nil
+	}
+	if err := chromedp.Run(m.p.ctx, chromedp.Focus(selector, chromedp.ByQuery)); err != nil {
+		return fmt.Errorf("%w: focus %q: %s", ErrEvaluate, selector, err.Error())
+	}
+	return nil
+}
+
 // Hover moves the cursor to the center of the element matching selector. No
 // click. Useful to trigger :hover styles or hover-only menus.
 func (m *MouseAPI) Hover(selector string) error {
-	x, y, err := m.p.elementCenter(selector)
+	x, y, err := m.p.elementClickPoint(selector)
 	if err != nil {
 		return err
 	}
@@ -64,7 +117,7 @@ func (m *MouseAPI) Hover(selector string) error {
 // DoubleClick fires two left clicks at the element's center within ~120ms —
 // the standard double-click window in browsers.
 func (m *MouseAPI) DoubleClick(selector string) error {
-	x, y, err := m.p.elementCenter(selector)
+	x, y, err := m.p.elementClickPoint(selector)
 	if err != nil {
 		return err
 	}
@@ -80,7 +133,7 @@ func (m *MouseAPI) DoubleClick(selector string) error {
 // pages open a context menu — chromekit does NOT auto-dismiss it; the caller
 // either picks an item or calls Keyboard().Press("Escape").
 func (m *MouseAPI) RightClick(selector string) error {
-	x, y, err := m.p.elementCenter(selector)
+	x, y, err := m.p.elementClickPoint(selector)
 	if err != nil {
 		return err
 	}
@@ -93,11 +146,11 @@ func (m *MouseAPI) RightClick(selector string) error {
 // moves are needed because HTML5 drag fires only after the pointer crosses a
 // distance threshold — a single jump won't trigger it.
 func (m *MouseAPI) DragAndDrop(fromSel, toSel string) error {
-	fx, fy, err := m.p.elementCenter(fromSel)
+	fx, fy, err := m.p.elementClickPoint(fromSel)
 	if err != nil {
 		return err
 	}
-	tx, ty, err := m.p.elementCenter(toSel)
+	tx, ty, err := m.p.elementClickPoint(toSel)
 	if err != nil {
 		return err
 	}
@@ -131,11 +184,14 @@ func (m *MouseAPI) Drag(fromX, fromY, toX, toY float64) error {
 	return m.p.backend.MouseUp(m.p.ctx, toX, toY, input.MouseLeft)
 }
 
-// elementCenter resolves selector to its bounding box center in CSS px.
-// Centralizes the QuerySelector → BoundingBox → midpoint dance so mouse
-// extras and drag share one path. Lives on Page (private) so frame-side
-// helpers can reuse it later.
-func (p *Page) elementCenter(selector string) (float64, float64, error) {
+// elementClickPoint resolves selector to a click point inside its bounding
+// box. Picks a random point within the central MOUSE_PADDING_WIDTH ×
+// MOUSE_PADDING_HEIGHT fraction of the box instead of the exact midpoint —
+// repeated clicks on the same element land at slightly different pixels,
+// which reads as human and avoids fingerprint patterns that flag dead-center
+// clicks. Returns ErrEvaluate when the box has zero size (element collapsed
+// / display:none).
+func (p *Page) elementClickPoint(selector string) (float64, float64, error) {
 	if err := p.alive(); err != nil {
 		return 0, 0, err
 	}
@@ -150,5 +206,11 @@ func (p *Page) elementCenter(selector string) (float64, float64, error) {
 	if box.Width <= 0 || box.Height <= 0 {
 		return 0, 0, fmt.Errorf("%w: zero-size element %q", ErrEvaluate, selector)
 	}
-	return box.Left + box.Width/2, box.Top + box.Height/2, nil
+	cx := box.Left + box.Width/2
+	cy := box.Top + box.Height/2
+	halfW := box.Width * MOUSE_PADDING_WIDTH / 2
+	halfH := box.Height * MOUSE_PADDING_HEIGHT / 2
+	x := cx + (rand.Float64()*2-1)*halfW
+	y := cy + (rand.Float64()*2-1)*halfH
+	return x, y, nil
 }
