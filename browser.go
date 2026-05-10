@@ -77,6 +77,14 @@ func Launch(chromePath string, opts ...Option) (*Browser, error) {
 		cfg:         cfg,
 		log:         cfg.logger,
 	}
+	// Capture chrome PID from chromedp's allocator. Required for HWND lookup
+	// via PID enum — without it Focus falls back to page-title heuristic which
+	// fails on blank pages (the typical state at automation start).
+	if c := chromedp.FromContext(ctx); c != nil && c.Browser != nil {
+		if p := c.Browser.Process(); p != nil {
+			b.pid = uint32(p.Pid)
+		}
+	}
 	if _, err := b.NewPage(); err != nil {
 		b.Close()
 		return nil, err
