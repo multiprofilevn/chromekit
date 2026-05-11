@@ -2,6 +2,14 @@
 
 All notable changes to the chromekit library are documented here. Pre-1.0, semver not strictly enforced — API may evolve.
 
+## [v0.7.0] — 2026-05-11
+
+### Added
+- `Page.WaitForSelectorGone(selector, timeout)` — blocks until the selector no longer matches OR the matched element is detached/hidden (`offsetParent == null`). Sugar over `WaitForFunction`.
+- `Page.SetSelectValue(selector, value)` — sets `<select>.value` and dispatches a bubbling `change` event so React/Vue/Angular state bindings update. Returns `ErrEvaluate` when the selector matches nothing.
+
+Both methods are integration-tested (build tag `integration`).
+
 ## [Unreleased]
 
 ### Added

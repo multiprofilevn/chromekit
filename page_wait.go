@@ -117,6 +117,14 @@ func (p *Page) pollUntil(timeout time.Duration, check func(context.Context) (boo
 	}
 }
 
+// WaitForSelectorGone blocks until the selector either no longer matches an
+// element or the matched element is detached / hidden (offsetParent == null).
+// Built on WaitForFunction.
+func (p *Page) WaitForSelectorGone(selector string, timeout time.Duration) error {
+	expr := fmt.Sprintf(`(()=>{const e=document.querySelector(%q); return !e || e.offsetParent==null;})()`, selector)
+	return p.WaitForFunction(expr, timeout)
+}
+
 // WaitForSelector polls until the selector matches a visible element or timeout.
 func (p *Page) WaitForSelector(selector string, timeout time.Duration) error {
 	if err := p.alive(); err != nil {

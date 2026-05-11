@@ -20,8 +20,8 @@ chromekit/
 │   Page struct, tab lifecycle, getters (Id, URL, Title, etc.)
 ├── page_navigate.go (116 LOC)
 │   Navigate / Reload / GoBack / GoForward
-├── page_wait.go (148 LOC)
-│   WaitForReady / WaitForSelector / WaitForChangeURL / WaitForFunction
+├── page_wait.go (158 LOC)
+│   WaitForReady / WaitForSelector / WaitForSelectorGone / WaitForChangeURL / WaitForFunction
 ├── page_action.go (124 LOC)
 │   Click / ClickElement / Type / Hover — shorthand high-level actions
 ├── page_dom.go (150 LOC)
@@ -46,6 +46,8 @@ chromekit/
 │   Keyboard() namespace — Press / Down / Up / Type / TypeFast / TypeHuman
 ├── page_type_selector.go (123 LOC)
 │   Keyboard().TypeSelector(selector, text, cfg) — type via TypeHuman + verify via .value/.innerText/.textContent
+├── page_select.go (28 LOC)
+│   SetSelectValue(selector, value) — set <select>.value + fire change event for framework state binding
 ├── page_downloads_api.go (87 LOC)
 │   Downloads() namespace — SetPath(dir) / Wait()
 ├── page_headers.go
