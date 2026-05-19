@@ -13,4 +13,7 @@ var (
 	ErrFrameDetached      = errors.New("chromekit: frame detached")
 	ErrDownloadCanceled    = errors.New("chromekit: download canceled")
 	ErrTypeSelectorMismatch = errors.New("chromekit: type selector value mismatch")
+	ErrTabActivateTimeout  = errors.New("chromekit: tab activation not confirmed (timeout)")
+	ErrNoLaunchTarget      = errors.New("chromekit: no page target after launch")
+	ErrCannotCloseLastPage = errors.New("chromekit: cannot close the only page (use Close)")
 )

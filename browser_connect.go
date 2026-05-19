@@ -90,39 +90,10 @@ func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 	b.pagesMu.Lock()
 	defer b.pagesMu.Unlock()
 	for _, t := range targets {
-		if t.ID == primaryID {
-			p := &Page{
-				id:      primaryID,
-				ctx:     b.ctx,
-				cancel:  b.cancel,
-				log:     b.log,
-				cfg:     b.cfg,
-				browser: b,
-				index:   b.pageCount,
-			}
-			b.pages = append(b.pages, p)
-			b.pageCount++
-			b.current = p
-			wirePage(p)
-			continue
-		}
-		ctx, cancel := chromedp.NewContext(b.ctx, chromedp.WithTargetID(target.ID(t.ID)))
-		p := &Page{
-			id:      t.ID,
-			ctx:     ctx,
-			cancel:  cancel,
-			log:     b.log,
-			cfg:     b.cfg,
-			browser: b,
-			index:   b.pageCount,
-		}
-		b.pages = append(b.pages, p)
-		b.pageCount++
-		// b.current already points at primary — leave it.
-		if b.current == nil {
-			b.current = p
-		}
-		wirePage(p)
+		// attachToTarget owns the primary/current selection rule (primary
+		// wins; first non-primary only if current still nil) — identical to
+		// the previous inlined logic. Caller holds b.pagesMu per its contract.
+		_, _ = b.attachToTarget(t.ID, t.ID == primaryID)
 	}
 }
 

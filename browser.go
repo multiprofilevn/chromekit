@@ -43,7 +43,8 @@ type Browser struct {
 	pid uint32
 }
 
-// Launch starts Chrome with the given options and opens the first blank page.
+// Launch starts Chrome with the given options and attaches to the blank page
+// chromedp bound on Run; it does not spawn an extra tab.
 // Caller MUST defer b.Close() to avoid leaking the Chrome process.
 //
 // chromePath is the absolute path to the Chrome / Chromium binary. Pass an
@@ -85,11 +86,34 @@ func Launch(chromePath string, opts ...Option) (*Browser, error) {
 			b.pid = uint32(p.Pid)
 		}
 	}
-	if _, err := b.NewPage(); err != nil {
+	// Attach to the page target chromedp already bound when Run succeeded —
+	// deterministic, no enumeration, so an extension welcome tab can never be
+	// selected (the historical wrong-tab race). Do NOT spawn a 2nd tab.
+	tid, err := resolveLaunchTarget(b.ctx)
+	if err != nil {
 		b.Close()
 		return nil, err
 	}
+	b.pagesMu.Lock()
+	_, aerr := b.attachToTarget(tid, true)
+	b.pagesMu.Unlock()
+	if aerr != nil {
+		b.Close()
+		return nil, aerr
+	}
 	return b, nil
+}
+
+// resolveLaunchTarget returns the page target ID chromedp bound to ctx when
+// chromedp.Run succeeded. Deterministic (no enumeration). Defensive nil-guard:
+// if chromedp bound no page target, fail loud with ErrNoLaunchTarget — no
+// spawn, no enumerate fallback (both re-introduce the two-tab race).
+func resolveLaunchTarget(ctx context.Context) (string, error) {
+	c := chromedp.FromContext(ctx)
+	if c == nil || c.Target == nil {
+		return "", fmt.Errorf("%w: chromedp bound no page target on Run", ErrNoLaunchTarget)
+	}
+	return string(c.Target.TargetID), nil
 }
 
 func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAllocatorOption {

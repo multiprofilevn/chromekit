@@ -44,6 +44,45 @@ func (b *Browser) NewPage() (*Page, error) {
 	return p, nil
 }
 
+// attachToTarget wraps a known Chrome target ID into a fully wired *Page and
+// registers it on the browser. Shared by Launch (primary=true, the target
+// chromedp bound on Run) and Connect's attachKnownTargets.
+//
+// Lock contract: the CALLER must hold b.pagesMu. attachToTarget does NOT lock
+// — it mutates b.pages/b.current/b.pageCount under the caller's lock.
+//
+// primary=true reuses the browser-anchored ctx/cancel (the already-attached
+// target) and makes the page current. Non-primary targets get their own
+// sub-context and only become current if none is set yet (preserves the
+// original attachKnownTargets selection rule).
+func (b *Browser) attachToTarget(tid string, primary bool) (*Page, error) {
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+	)
+	if primary {
+		ctx, cancel = b.ctx, b.cancel
+	} else {
+		ctx, cancel = chromedp.NewContext(b.ctx, chromedp.WithTargetID(target.ID(tid)))
+	}
+	p := &Page{
+		id:      tid,
+		ctx:     ctx,
+		cancel:  cancel,
+		log:     b.log,
+		cfg:     b.cfg,
+		browser: b,
+		index:   b.pageCount,
+	}
+	b.pages = append(b.pages, p)
+	b.pageCount++
+	if primary || b.current == nil {
+		b.current = p
+	}
+	wirePage(p)
+	return p, nil
+}
+
 // wirePage attaches the namespace API holders and starts the cross-cutting
 // listeners on a freshly constructed Page. Both NewPage and Connect's
 // attachKnownTargets MUST run this — without it page.Mouse(), .Keyboard(),
@@ -78,6 +117,14 @@ func (b *Browser) ClosePage(id string) error {
 	}
 	if idx < 0 {
 		return fmt.Errorf("%w: id=%s", ErrPageNotFound, id)
+	}
+
+	// F-NEW-2: on the Launch owns-process path, closing the only page cancels
+	// its context and silently kills Chrome. Force the caller to choose
+	// explicitly (Close() the whole browser, or keep the page). Connect
+	// (attached==true) keeps its detach semantics — guard does not fire.
+	if len(b.pages) == 1 && !b.attached {
+		return fmt.Errorf("%w: id=%s", ErrCannotCloseLastPage, id)
 	}
 
 	closed := b.pages[idx]
