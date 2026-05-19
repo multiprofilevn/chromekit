@@ -195,8 +195,11 @@ func (b *Browser) resolvePID() uint32 {
 // propagation is asynchronous (typically 50-200ms after activateTarget).
 func (b *Browser) Focus(ctx context.Context) error {
 	if p := b.Current(); p != nil {
+		// Fatal, not warn-and-continue: if the tab isn't confirmed active,
+		// native input would land on the wrong tab (the recurring bug). Fail
+		// the focus so the job fails loud instead of clicking blind.
 		if err := p.BringToFront(); err != nil {
-			b.log.Warnf("focus: BringToFront failed: %v", err)
+			return err
 		}
 	}
 	if err := ctx.Err(); err != nil {

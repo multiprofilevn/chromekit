@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/tuwibu/chromekit/input"
@@ -84,7 +86,58 @@ func (p *Page) BringToFront() error {
 	if err := p.alive(); err != nil {
 		return err
 	}
-	return chromedp.Run(p.ctx, target.ActivateTarget(target.ID(p.id)))
+	// page.BringToFront (CDP Page.bringToFront) is the reliable primitive — it
+	// brings the page to the foreground at the page level. target.ActivateTarget
+	// alone often no-ops when session-restore / extension welcome tabs race
+	// against the activation. Call both: page-level first (the workhorse), then
+	// target-level (keeps tab-strip selection in sync for native-input HWND
+	// lookups). Errors on target.ActivateTarget are non-fatal.
+	if err := chromedp.Run(p.ctx, page.BringToFront()); err != nil {
+		return fmt.Errorf("%w: bring to front: %s", ErrEvaluate, err.Error())
+	}
+	// page.BringToFront / target.ActivateTarget return on CDP ACK, NOT on the
+	// visual tab switch. Block until the tab is actually the visible one
+	// (document.visibilityState === 'visible') before returning — otherwise
+	// native input fires on whatever tab is still foreground. Re-issue
+	// activation each miss; fail loud on timeout (never silently proceed).
+	activate := func(c context.Context) error {
+		return chromedp.Run(c, target.ActivateTarget(target.ID(p.id)))
+	}
+	probe := func(c context.Context) (string, error) {
+		var s string
+		err := chromedp.Run(c, chromedp.Evaluate("document.visibilityState", &s))
+		return s, err
+	}
+	return awaitTabVisible(p.ctx, activate, probe, 3*time.Second, 75*time.Millisecond)
+}
+
+// awaitTabVisible blocks until probe reports "visible", re-issuing activate on
+// every miss, until deadline. Pure: no globals, no chromedp — all I/O via the
+// injected closures, so the determinism guard is testable without a live
+// browser. Returns wrapped ErrTabActivateTimeout on deadline, ctx.Err() on
+// cancellation. NEVER returns nil unless the tab was confirmed visible.
+func awaitTabVisible(
+	ctx context.Context,
+	activate func(context.Context) error,
+	probe func(context.Context) (string, error),
+	deadline time.Duration,
+	step time.Duration,
+) error {
+	end := time.Now().Add(deadline)
+	for {
+		_ = activate(ctx)
+		if vis, _ := probe(ctx); vis == "visible" {
+			return nil
+		}
+		if !time.Now().Before(end) {
+			return fmt.Errorf("%w: tab not visible after %s", ErrTabActivateTimeout, deadline)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(step):
+		}
+	}
 }
 
 // GetURL returns the current document URL.
