@@ -10,15 +10,17 @@
 
 **Release strategy**: TBD. Once 1.0 ships, will adopt semantic versioning + changelog discipline.
 
-## Recent milestone (last 5 commits)
+## Recent milestone (last 7 commits, as of 2026-05-17)
 
 | Commit | Change | Impact |
 |--------|--------|--------|
-| `9f894ab` | feat(browser): expose Done channel and PID accessor | Graceful reaping of Launch-owned process. Debugging support (PID). |
-| `9ce34d6` | feat(navigate): native backend Navigate via Chrome omnibox | Can navigate via native input (omnibox focus + type + enter). |
-| `c466f35` | feat(launch): require explicit Chrome path as first arg | Breaking: removed fallback to chromedp's default LookPath. Explicit is better. |
-| `986891e` | fix(close): keep chrome process alive after Connect+Close | Fixed: Connect+Close now leaves process running (was killing it). Lifecycle correctness. |
-| `c5767f2` | feat(input): pid-based HWND lookup with title fallback | Windows native input now finds window handle by PID, falls back to title search. |
+| `656d3d3` | feat: WithModifyCmd option | Hooks *exec.Cmd before Chrome starts — inject raw argv for GPM-Login forks. |
+| `7ead567` | feat(keyboard): add ClearInput + CDP KeyCombo | Wipe focused input via Ctrl+A + Delete; optional selector support. |
+| `45b1377` | fix(launch): capture chrome PID from chromedp allocator | PID from chromedp's process handle → enables reliable HWND lookup (no title heuristic). |
+| `bc1becb` | feat(browser): expose InputBackend() getter | Reports launched input backend (CDP or native); for orchestrators branching behavior. |
+| `ca551df` | feat(keyboard): add TypeHuman + TypeSelector | Slow jittered typing with configurable mistake rate; selector-based form filling with retry. |
+| `270ca69` | refactor(launch): drop chromedp default allocator options | Breaking: callers now own full flag list. Per-engine profiles (gologin/gpmlogin/stock) need different argv. |
+| `6d96d37` | feat(page): add WaitForSelectorGone + SetSelectValue | Wait for element detach/hide; set <select>.value + fire change event for frameworks. |
 
 ## Planned work (in-scope)
 

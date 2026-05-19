@@ -43,7 +43,7 @@ chromekit/
 ├── page_mouse_api.go (154 LOC)
 │   Mouse() namespace — MoveTo / ClickAt / Scroll / Tap / Hover / DoubleClick / RightClick / Drag / DragAndDrop
 ├── page_keyboard_api.go (138 LOC)
-│   Keyboard() namespace — Press / Down / Up / Type / TypeFast / TypeHuman
+│   Keyboard() namespace — Press / Down / Up / Type / TypeFast / TypeHuman / ClearInput
 ├── page_type_selector.go (123 LOC)
 │   Keyboard().TypeSelector(selector, text, cfg) — type via TypeHuman + verify via .value/.innerText/.textContent
 ├── page_select.go (28 LOC)
@@ -140,6 +140,10 @@ chromekit/
 - `WithNativeWindow(x, y, scale)` — screen offset for native backend
 - `WithCursorProfile(profile)` — CursorHuman (Bezier), CursorFast (linear), CursorMachine (one-shot)
 - `WithFlag(key, value)` — arbitrary chromedp allocator flag
+- `WithModifyCmd(fn func(*exec.Cmd))` — inject raw argv before Chrome starts (e.g. single-dash flags for GPM-Login forks)
+
+**Getters**:
+- `Browser.InputBackend() BackendType` — reports launched input backend (CDP or native)
 
 ## Data model
 

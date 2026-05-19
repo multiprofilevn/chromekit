@@ -14,6 +14,25 @@ Both methods are integration-tested (build tag `integration`).
 
 ### Added
 
+#### Exec Hook & Input Backend Getter
+- **exec.Cmd mutation hook** (`feat: WithModifyCmd option`)
+  - `WithModifyCmd(fn func(*exec.Cmd)) Option` injects raw flags before Chrome starts
+  - Use for single-dash flags like `-disable-features=` on GPM-Login Chromium forks
+  - Hook fires after chromedp builds default args, before exec.Cmd.Start
+  - Safe to mutate `Cmd.Args`; do not mutate `Cmd.Process`
+
+- **input backend accessor** (`feat(browser): expose InputBackend() getter`)
+  - `Browser.InputBackend() BackendType` reports which backend the browser was launched with
+  - For orchestrators (e.g. chromefleet) branching behavior on native vs CDP
+  - Returns `BackendCDP` if browser or config is nil
+
+#### Keyboard Utilities
+- **clear input field** (`feat(keyboard): add ClearInput`)
+  - `KeyboardAPI.ClearInput(selector ...string) error` — Ctrl+A then Delete
+  - With selector: focuses via `chromedp.Focus` first (DOM-level)
+  - Without selector: assumes caller has already focused the field
+  - Returns `ErrEvaluate` if focus fails
+
 #### Human-like Keyboard Input
 - **human typing with jittered cadence** (`feat(keyboard): add TypeHuman for human-like typing`)
   - `KeyboardAPI.TypeHuman(text, cfg ...input.HumanTypeConfig)` types at 80–220ms per character
@@ -34,6 +53,30 @@ Both methods are integration-tested (build tag `integration`).
 - `input.Keyboard.TypeHuman(ctx, text, cfg)` — low-level human typing dispatch
 - `TypeSelectorConfig struct` — configure TypeSelector retry + strictness + per-char cadence
 - `ErrTypeSelectorMismatch error` — returned when Strict=true and value mismatches after MaxAttempts
+
+### Changed
+
+#### Breaking: Allocator Defaults No Longer Bundled
+- **commit `270ca69` refactor(launch): drop chromedp default allocator options**
+  - `chromedp.DefaultExecAllocatorOptions` no longer prepended to the flag list
+  - **Rationale**: hidden defaults leaked flags callers explicitly tried to avoid; per-engine profiles (gologin / gpmlogin / stock Chrome) need wildly different argv
+  - **Migration**: `buildAllocatorOptions` starts from an empty option set; only `headless` + caller `WithFlag(k, v)` entries are applied. Any chromedp default flag you relied on (e.g. `disable-extensions`, `no-first-run`) must now be re-added explicitly via `chromekit.WithFlag("flag-name", value)`. There is no public splat of `chromedp.DefaultExecAllocatorOptions`.
+  - Simplifies flag composition for non-standard Chrome forks
+
+#### Platform-specific Improvements
+- **PID capture from chromedp allocator** (`fix(launch): capture chrome PID from chromedp allocator`)
+  - Browser PID now captured from `chromedp.FromContext(ctx).Browser.Process()` right after `chromedp.Run` succeeds
+  - Windows HWND lookup no longer depends on page title heuristic
+  - `findChromeWindowByPID` resolves the visible window reliably even on blank pages at automation start
+
+### Pending (Uncommitted)
+
+#### Page Lifecycle
+- **BringToFront rewrite** (page.go uncommitted)
+  - Now calls `page.BringToFront()` (CDP Page.bringToFront) as primary primitive
+  - Then `target.ActivateTarget` (non-fatal) for tab-strip sync
+  - Reason: ActivateTarget alone no-ops when session-restore/extension tabs race activation; native-input HWND lookups need tab-strip selection in sync
+  - **Status**: under review, not yet shipped
 
 ---
 

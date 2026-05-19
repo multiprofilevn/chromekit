@@ -62,14 +62,30 @@ chromekit wraps chromedp (which wraps Chrome DevTools Protocol) with two key abs
 ### Launch (own the process)
 
 ```
-User code: b, _ := Launch("C:\\...\\chrome.exe")
+User code: b, _ := Launch("C:\\...\\chrome.exe", opts...)
+                    │
+                    ▼
+         Apply options (config merge)
+                    │
+                    ▼
+         buildAllocatorOptions(chromePath, cfg)
+         (caller owns full flag list; chromedp defaults
+          NOT prepended — append manually if desired)
                     │
                     ▼
          Create ExecAllocator
+         with merged flag list
                     │
                     ▼
-         spawn chrome.exe (OS process)
-         record pid
+         Build exec.Cmd for chrome.exe
+                    │
+                    ▼
+         WithModifyCmd hook (if set)
+         Raw argv injection (e.g. single-dash flags)
+                    │
+                    ▼
+         exec.Cmd.Start() — spawn chrome.exe
+         record pid from chromedp allocator
                     │
                     ▼
          Create Context (with allocator)
@@ -91,7 +107,9 @@ User code: b, _ := Launch("C:\\...\\chrome.exe")
                     Done
 ```
 
-Browser owns process lifecycle. `Done <-chan struct{}` signals when process exits (useful for reaping). PID accessible via `PID()` for debugging / focus / HWND lookup.
+Browser owns process lifecycle. `Done <-chan struct{}` signals when process exits (useful for reaping). PID captured from `chromedp.FromContext(ctx).Browser.Process()` after chromedp.Run succeeds — enables reliable HWND lookup via PID enum (Windows) without depending on page title heuristics.
+
+**Flag composition**: callers own the entire argv. `chromedp.DefaultExecAllocatorOptions` is no longer prepended — per-engine profiles (gologin / gpmlogin / stock Chrome) need wildly different sets. If you want the chromedp defaults, append them explicitly before Launch.
 
 ### Connect (reuse existing process)
 

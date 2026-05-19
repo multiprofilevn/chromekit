@@ -221,7 +221,8 @@ import (
 ## Breaking changes
 
 - **Pre-1.0 library** — minor version bumps may break API. Semantic versioning applies (vX.Y.Z).
-- **Recent breaking change**: Launch now requires explicit Chrome path as first arg (before: fell back to chromedp default). Updated README quickstart.
+- **Chrome path as first arg**: Launch now requires explicit Chrome path (before: fell back to chromedp default). Updated README quickstart.
+- **Allocator defaults not bundled**: `chromedp.DefaultExecAllocatorOptions` is no longer prepended — callers own the full flag list. `buildAllocatorOptions` applies only `headless` + caller `WithFlag(k, v)` entries; re-add any needed chromedp default flag explicitly via `WithFlag`. Reason: hidden defaults leaked flags callers explicitly tried to avoid; per-engine profiles need wildly different argv.
 - **Future**: freeze API once 1.0 ships; use extension patterns (WithFlag, namespace methods) for new features instead of altering signatures.
 
 ## Godoc & comments
