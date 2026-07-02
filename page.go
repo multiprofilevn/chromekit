@@ -64,6 +64,12 @@ func (p *Page) Downloads() *DownloadsAPI { return p.downloadsAPI }
 // ID returns the chromedp target ID for the page.
 func (p *Page) ID() string { return p.id }
 
+// Ctx returns the underlying chromedp tab context. Use for raw cdproto /
+// chromedp.Run calls when a public method doesn't cover the operation
+// (e.g. page.AddScriptToEvaluateOnNewDocument, webauthn.Enable). Caller MUST
+// NOT cancel the returned context — it is owned by the Page lifecycle.
+func (p *Page) Ctx() context.Context { return p.ctx }
+
 // Index returns the page's order within the browser.
 func (p *Page) Index() int {
 	p.mu.RLock()

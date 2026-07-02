@@ -184,32 +184,68 @@ func (m *MouseAPI) Drag(fromX, fromY, toX, toY float64) error {
 	return m.p.backend.MouseUp(m.p.ctx, toX, toY, input.MouseLeft)
 }
 
-// elementClickPoint resolves selector to a click point inside its bounding
-// box. Picks a random point within the central MOUSE_PADDING_WIDTH ×
-// MOUSE_PADDING_HEIGHT fraction of the box instead of the exact midpoint —
-// repeated clicks on the same element land at slightly different pixels,
-// which reads as human and avoids fingerprint patterns that flag dead-center
-// clicks. Returns ErrEvaluate when the box has zero size (element collapsed
-// / display:none).
+// settleMinMs / settleMaxMs cover smooth-scroll animation durations (Twitter,
+// Material, Tailwind sites all animate scroll 200-700ms). Lower bound 500ms
+// to outlast common cubic-bezier curves; upper 1000ms to bound worst case.
+const (
+	settleMinMs = 500
+	settleMaxMs = 1000
+)
+
+// elementClickPoint resolves selector to a click point inside the element's
+// viewport rect. Sequence:
+//
+//  1. QuerySelector — confirm element exists.
+//  2. ScrollIntoView({block:'center', inline:'center'}) — guarantee element
+//     is in viewport. Necessary for native (OS-level SendInput) backends:
+//     clicks at off-viewport CSS coords land on whatever's currently rendered
+//     at that pixel (often nothing / sidebar / wrong element).
+//  3. Sleep 500-1000ms (randomised) — let smooth-scroll animation settle.
+//     Measuring mid-animation returns in-flight coords; the actual click
+//     fires later when the element has moved.
+//  4. getBoundingClientRect via JS — viewport-relative, post-layout, fresh.
+//     Preferred over dom.GetBoxModel (CDP layout-tree) which can return
+//     content/border quad of an INNER child for compound DOM (button → span
+//     → text) → coords land outside the button's hit area, click missed.
+//  5. Pick random point in central MOUSE_PADDING_WIDTH × MOUSE_PADDING_HEIGHT
+//     band around center → human-ish jitter, avoids edge hit-test flips to
+//     siblings, avoids dead-center fingerprint pattern.
+//
+// Returns ErrEvaluate when zero-size or selector miss.
 func (p *Page) elementClickPoint(selector string) (float64, float64, error) {
 	if err := p.alive(); err != nil {
 		return 0, 0, err
 	}
-	node, err := p.QuerySelector(selector, 0)
-	if err != nil {
+	if _, err := p.QuerySelector(selector, 0); err != nil {
 		return 0, 0, err
 	}
-	box, err := p.BoundingBox(node)
-	if err != nil {
+	if err := p.ScrollIntoView(selector); err != nil {
 		return 0, 0, err
 	}
-	if box.Width <= 0 || box.Height <= 0 {
-		return 0, 0, fmt.Errorf("%w: zero-size element %q", ErrEvaluate, selector)
+	time.Sleep(time.Duration(settleMinMs+rand.Intn(settleMaxMs-settleMinMs+1)) * time.Millisecond)
+
+	rectJS := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%s);
+		if (!el) return null;
+		const r = el.getBoundingClientRect();
+		return { x: r.x, y: r.y, w: r.width, h: r.height };
+	})()`, strconv.Quote(selector))
+	var rect struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+		W float64 `json:"w"`
+		H float64 `json:"h"`
 	}
-	cx := box.Left + box.Width/2
-	cy := box.Top + box.Height/2
-	halfW := box.Width * MOUSE_PADDING_WIDTH / 2
-	halfH := box.Height * MOUSE_PADDING_HEIGHT / 2
+	if err := p.Evaluate(rectJS, &rect); err != nil {
+		return 0, 0, fmt.Errorf("%w: getBoundingClientRect %q: %s", ErrEvaluate, selector, err.Error())
+	}
+	if rect.W <= 0 || rect.H <= 0 {
+		return 0, 0, fmt.Errorf("%w: zero-size element %q (rect=%vx%v)", ErrEvaluate, selector, rect.W, rect.H)
+	}
+	cx := rect.X + rect.W/2
+	cy := rect.Y + rect.H/2
+	halfW := rect.W * MOUSE_PADDING_WIDTH / 2
+	halfH := rect.H * MOUSE_PADDING_HEIGHT / 2
 	x := cx + (rand.Float64()*2-1)*halfW
 	y := cy + (rand.Float64()*2-1)*halfH
 	return x, y, nil
