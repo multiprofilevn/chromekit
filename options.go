@@ -42,6 +42,7 @@ type config struct {
 	inputBackend  BackendType
 	nativeWindow  nativeWindow
 	cursorProfile CursorProfile
+	mousePathURL  string
 	flags         map[string]any
 	modifyCmd     func(*exec.Cmd)
 }
@@ -82,6 +83,13 @@ func WithProxy(addr string) Option {
 
 func WithInputBackend(t BackendType) Option {
 	return func(c *config) { c.inputBackend = t }
+}
+
+// WithMousePathURL sets the full URL of a mouse-positions endpoint that returns
+// a high-entropy {x,y,delay} cursor path. When set, ProfileHuman moves fetch
+// from it and replay; empty (default) keeps the pure local bezier engine.
+func WithMousePathURL(url string) Option {
+	return func(c *config) { c.mousePathURL = url }
 }
 
 // WithNativeWindow tells the native backend where the Chrome window sits on

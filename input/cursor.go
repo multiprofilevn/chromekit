@@ -3,8 +3,13 @@ package input
 import (
 	"context"
 	"math/rand"
+	"net/http"
 	"time"
 )
+
+// remotePathTimeout bounds a single mouse-positions call so a slow/dead API
+// fails fast to the local bezier fallback instead of stalling every move.
+const remotePathTimeout = 1200 * time.Millisecond
 
 // Profile selects how Cursor.MoveTo paints the path between two points.
 // Mirrors chromekit.CursorProfile so the input package stays self-contained.
@@ -26,6 +31,11 @@ type Cursor struct {
 	backend Backend
 	profile Profile
 	x, y    float64
+	// mousePathURL, when non-empty, is the full URL of a mouse-positions
+	// endpoint that returns a high-entropy {x,y,delay} path. ProfileHuman
+	// fetches from it and replays; any failure falls back to the local bezier.
+	mousePathURL string
+	httpc        *http.Client
 }
 
 // NewCursor builds a Cursor with the default human profile.
@@ -34,6 +44,17 @@ func NewCursor(b Backend) *Cursor { return &Cursor{backend: b, profile: ProfileH
 // NewCursorWithProfile builds a Cursor with an explicit movement profile.
 func NewCursorWithProfile(b Backend, p Profile) *Cursor {
 	return &Cursor{backend: b, profile: p}
+}
+
+// NewCursorWithProfileAndPath builds a Cursor that, on ProfileHuman, routes
+// moves through a remote mouse-positions endpoint (mousePathURL). Empty URL
+// behaves exactly like NewCursorWithProfile (pure local bezier).
+func NewCursorWithProfileAndPath(b Backend, p Profile, mousePathURL string) *Cursor {
+	c := &Cursor{backend: b, profile: p, mousePathURL: mousePathURL}
+	if mousePathURL != "" {
+		c.httpc = &http.Client{Timeout: remotePathTimeout}
+	}
+	return c
 }
 
 // Position returns the last x, y the cursor was moved to.
@@ -80,6 +101,24 @@ func (c *Cursor) MoveTo(ctx context.Context, x, y float64) error {
 		return nil
 
 	default: // ProfileHuman
+		// Prefer the remote high-entropy path when configured; fall back to the
+		// local bezier on any error / off-target result so moves never break.
+		if c.mousePathURL != "" {
+			if pts, err := fetchRemotePath(ctx, c.httpc, c.mousePathURL, c.x, c.y, x, y); err == nil && validRemotePath(pts, x, y) {
+				for _, p := range pts {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if err := c.backend.MouseMove(ctx, p.X, p.Y); err != nil {
+						return err
+					}
+					if p.Delay > 0 {
+						time.Sleep(time.Duration(p.Delay) * time.Millisecond)
+					}
+				}
+				return nil
+			}
+		}
 		steps := humanStepCount(c.x, c.y, x, y)
 		for _, p := range bezierPath(c.x, c.y, x, y, steps) {
 			if err := ctx.Err(); err != nil {

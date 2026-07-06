@@ -43,7 +43,11 @@ func (p *Page) initInput() {
 				profile = input.ProfileMachine
 			}
 		}
-		p.cursor = input.NewCursorWithProfile(p.backend, profile)
+		mousePathURL := ""
+		if p.cfg != nil {
+			mousePathURL = p.cfg.mousePathURL
+		}
+		p.cursor = input.NewCursorWithProfileAndPath(p.backend, profile, mousePathURL)
 		p.keyboard = input.NewKeyboard(p.backend)
 		p.touch = input.NewTouchScreen(p.backend)
 	})
