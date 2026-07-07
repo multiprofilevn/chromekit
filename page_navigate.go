@@ -43,6 +43,10 @@ func (p *Page) navigateOmnibox(url string, timeout time.Duration) error {
 	if err := p.browser.Focus(ctx); err != nil {
 		return fmt.Errorf("%w: focus: %s", ErrNavigate, err.Error())
 	}
+	// Stamp the current document BEFORE typing the URL so the post-Enter wait can
+	// tell the new page has actually committed (readyState alone races — the old
+	// doc is still "complete" the instant we poll after Enter).
+	p.markNavToken()
 	if err := p.keyboard.Combo(ctx, input.VKL, input.ModCtrl); err != nil {
 		return fmt.Errorf("%w: focus omnibox: %s", ErrNavigate, err.Error())
 	}
@@ -61,7 +65,9 @@ func (p *Page) navigateOmnibox(url string, timeout time.Duration) error {
 	if err := p.keyboard.Combo(ctx, input.VKReturn, 0); err != nil {
 		return fmt.Errorf("%w: enter: %s", ErrNavigate, err.Error())
 	}
-	return p.WaitForReady(timeout)
+	// Wait for the navigation to actually commit a new document + finish loading,
+	// not just for the (stale) old document to report ready.
+	return p.waitNavCommitted(timeout)
 }
 
 // stripScheme removes a leading "http://" or "https://" (case-insensitive).

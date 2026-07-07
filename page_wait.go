@@ -76,6 +76,39 @@ func (p *Page) WaitForChangeURL(timeout time.Duration) error {
 	})
 }
 
+// waitNavCommitted blocks until an omnibox navigation triggered by Enter has
+// actually committed a NEW document AND that document finished loading.
+//
+// WaitForReady alone races here: right after the Enter keypress Chrome has not
+// yet started the navigation, so the OLD document still reports
+// readyState=="complete" and the wait returns before the new page loads. The
+// caller stamps window.__ckNavToken on the pre-nav document (see markNavToken);
+// a committed navigation loads a fresh document where the token is absent, so
+// "token gone AND readyState complete" means the new page is really ready. This
+// also covers a same-URL reload (WaitForChangeURL cannot — the URL is unchanged).
+func (p *Page) waitNavCommitted(timeout time.Duration) error {
+	if err := p.alive(); err != nil {
+		return err
+	}
+	return p.pollUntil(timeout, func(ctx context.Context) (bool, error) {
+		var done bool
+		expr := `(document.readyState === "complete" && typeof window.__ckNavToken === "undefined")`
+		if err := chromedp.Run(ctx, chromedp.Evaluate(expr, &done)); err != nil {
+			// Cross-origin nav detaches the target briefly — keep polling.
+			return false, nil
+		}
+		return done, nil
+	})
+}
+
+// markNavToken stamps a sentinel on the current document so waitNavCommitted can
+// detect a committed navigation. Best-effort — a failed stamp just degrades the
+// post-Enter wait back to plain readyState polling.
+func (p *Page) markNavToken() {
+	var ok bool
+	_ = chromedp.Run(p.ctx, chromedp.Evaluate(`(window.__ckNavToken=1, true)`, &ok))
+}
+
 // WaitForFunction polls a JS expression until it returns truthy or timeout.
 // expr is evaluated as `!!(expr)`, so any truthy value works.
 func (p *Page) WaitForFunction(expr string, timeout time.Duration) error {
