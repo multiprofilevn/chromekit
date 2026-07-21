@@ -7,7 +7,48 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"sync"
+	"time"
 )
+
+var (
+	remoteTransportOnce sync.Once
+	remoteTransport     *http.Transport
+)
+
+// sharedRemoteTransport returns a process-wide pooled HTTP transport for remote
+// mouse-path fetches. One shared transport across every Cursor reuses TCP
+// connections; the old per-Cursor http.Client meant hundreds of separate
+// connection pools at fleet scale, none of them reusing sockets.
+func sharedRemoteTransport() *http.Transport {
+	remoteTransportOnce.Do(func() {
+		remoteTransport = &http.Transport{
+			MaxIdleConns:        64,
+			MaxIdleConnsPerHost: 32,
+			IdleConnTimeout:     90 * time.Second,
+		}
+	})
+	return remoteTransport
+}
+
+// resampleRemotePoints thins a dense server path down to at most max points,
+// sampled evenly and always keeping the exact final point so the click lands on
+// target. Each kept point keeps its own Delay; the delays of dropped points are
+// discarded, which intentionally shortens the gesture — the whole point of the
+// cap is to stop waiting on a round-trip per pixel. pts of length <= max (or
+// max <= 0) is returned unchanged.
+func resampleRemotePoints(pts []remotePoint, max int) []remotePoint {
+	if max <= 0 || len(pts) <= max {
+		return pts
+	}
+	last := len(pts) - 1
+	out := make([]remotePoint, 0, max)
+	for i := 0; i < max-1; i++ {
+		idx := int(float64(i) * float64(last) / float64(max-1))
+		out = append(out, pts[idx])
+	}
+	return append(out, pts[last])
+}
 
 // remotePoint is one step of a server-generated cursor path: a coordinate plus
 // the delay (ms) to wait before emitting the next move.

@@ -43,19 +43,45 @@ func interpolate(x1, y1, x2, y2 float64, steps int) []Point {
 	return out
 }
 
+// maxGesturePoints caps the number of points in a single mouse gesture. Every
+// point is one CDP dispatch that blocks on a renderer acknowledgement, so fewer
+// points means far less exposure to slow acks when the host is under load. 24
+// still traces a Bezier with ease-in-out and per-point jitter — enough to read
+// as human — while cutting the old 80-point ceiling's round-trips by ~3x (and a
+// remote path's 100-300 points by far more).
+const maxGesturePoints = 24
+
 // humanStepCount picks step count proportional to distance (1 step per ~12px),
-// floored at 8 and capped at 80. Used by the Human profile so long moves don't
-// look like 25-step jumps.
+// floored at 8 and capped at maxGesturePoints. Used by the Human profile so long
+// moves don't look like 25-step jumps, without paying a round-trip per pixel.
 func humanStepCount(x1, y1, x2, y2 float64) int {
 	dist := math.Hypot(x2-x1, y2-y1)
 	steps := int(dist / 12)
 	if steps < 8 {
 		return 8
 	}
-	if steps > 80 {
-		return 80
+	if steps > maxGesturePoints {
+		return maxGesturePoints
 	}
 	return steps
+}
+
+// resamplePoints returns at most max points sampled evenly from pts, always
+// preserving the exact final point so a click lands on target. pts of length
+// <= max (or max <= 0) is returned unchanged. Used to thin a dense externally
+// generated path down to the gesture cap.
+func resamplePoints(pts []Point, max int) []Point {
+	if max <= 0 || len(pts) <= max {
+		return pts
+	}
+	last := len(pts) - 1
+	out := make([]Point, 0, max)
+	// max-1 evenly spaced samples across the body, then the guaranteed endpoint.
+	for i := 0; i < max-1; i++ {
+		idx := int(float64(i) * float64(last) / float64(max-1))
+		out = append(out, pts[idx])
+	}
+	return append(out, pts[last])
 }
 
 // easeInOutCubic warps t∈[0,1] to a curve that's slow at the ends and fast in

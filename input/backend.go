@@ -54,8 +54,8 @@ type Config struct {
 type Modifier uint32
 
 const (
-	ModCtrl  Modifier = 1 << iota // Control / Cmd-equivalent
-	ModAlt                        // Alt / Option
+	ModCtrl Modifier = 1 << iota // Control / Cmd-equivalent
+	ModAlt                       // Alt / Option
 	ModShift
 	ModWin // Windows / Super
 )
@@ -66,11 +66,11 @@ const (
 	VKReturn    uint16 = 0x0D
 	VKBackspace uint16 = 0x08
 	VKEscape    uint16 = 0x1B
-	VKEnd    uint16 = 0x23
-	VKHome   uint16 = 0x24
-	VKDelete uint16 = 0x2E
-	VKA      uint16 = 0x41
-	VKL      uint16 = 0x4C
+	VKEnd       uint16 = 0x23
+	VKHome      uint16 = 0x24
+	VKDelete    uint16 = 0x2E
+	VKA         uint16 = 0x41
+	VKL         uint16 = 0x4C
 )
 
 // Backend is the low-level mouse/keyboard dispatcher. Higher-level helpers

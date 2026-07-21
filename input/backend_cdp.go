@@ -3,6 +3,7 @@ package input
 import (
 	"context"
 	"fmt"
+	"time"
 
 	cdpinput "github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
@@ -26,12 +27,12 @@ type vkSpec struct {
 var vkToCDPKey = map[uint16]vkSpec{
 	VKReturn:    {key: "Enter", code: "Enter", text: "\r", vkCode: 13},
 	VKBackspace: {key: "Backspace", code: "Backspace", vkCode: 8},
-	VKEscape: {key: "Escape", code: "Escape", vkCode: 27},
-	VKEnd:    {key: "End", code: "End", vkCode: 35},
-	VKHome:   {key: "Home", code: "Home", vkCode: 36},
-	VKDelete: {key: "Delete", code: "Delete", vkCode: 46},
-	VKA:      {key: "a", code: "KeyA", text: "a", vkCode: 65},
-	VKL:      {key: "l", code: "KeyL", text: "l", vkCode: 76},
+	VKEscape:    {key: "Escape", code: "Escape", vkCode: 27},
+	VKEnd:       {key: "End", code: "End", vkCode: 35},
+	VKHome:      {key: "Home", code: "Home", vkCode: 36},
+	VKDelete:    {key: "Delete", code: "Delete", vkCode: 46},
+	VKA:         {key: "a", code: "KeyA", text: "a", vkCode: 65},
+	VKL:         {key: "l", code: "KeyL", text: "l", vkCode: 76},
 }
 
 // cdpModBits translates the package's Modifier bitmask into CDP's modifier
@@ -55,18 +56,35 @@ func cdpModBits(m Modifier) cdpinput.Modifier {
 	return out
 }
 
+// perDispatchTimeout bounds a single CDP input dispatch.
+//
+// Input.dispatchMouseEvent and friends only acknowledge once the renderer has
+// consumed the event, so a busy, throttled or wedged tab can leave the call
+// waiting forever. A human-like gesture is dozens of these in a row: without a
+// per-event bound one stuck renderer parks the whole gesture, and every other
+// caller sharing that connection behind it. Five seconds is far longer than a
+// healthy dispatch (sub-millisecond) and short enough to fail loud.
+const perDispatchTimeout = 5 * time.Second
+
+// dispatch runs one CDP input action under perDispatchTimeout.
+func dispatch(ctx context.Context, action chromedp.Action) error {
+	ctx, cancel := context.WithTimeout(ctx, perDispatchTimeout)
+	defer cancel()
+	return chromedp.Run(ctx, action)
+}
+
 type cdpBackend struct{}
 
 func newCDP() Backend { return &cdpBackend{} }
 
 func (cdpBackend) MouseMove(ctx context.Context, x, y float64) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return cdpinput.DispatchMouseEvent(cdpinput.MouseMoved, x, y).Do(ctx)
 	}))
 }
 
 func (cdpBackend) MouseDown(ctx context.Context, x, y float64, button MouseButton) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return cdpinput.DispatchMouseEvent(cdpinput.MousePressed, x, y).
 			WithButton(toCDPButton(button)).
 			WithClickCount(1).
@@ -75,7 +93,7 @@ func (cdpBackend) MouseDown(ctx context.Context, x, y float64, button MouseButto
 }
 
 func (cdpBackend) MouseUp(ctx context.Context, x, y float64, button MouseButton) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return cdpinput.DispatchMouseEvent(cdpinput.MouseReleased, x, y).
 			WithButton(toCDPButton(button)).
 			WithClickCount(1).
@@ -84,7 +102,7 @@ func (cdpBackend) MouseUp(ctx context.Context, x, y float64, button MouseButton)
 }
 
 func (cdpBackend) MouseScroll(ctx context.Context, deltaX, deltaY float64) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return cdpinput.DispatchMouseEvent(cdpinput.MouseWheel, 0, 0).
 			WithDeltaX(deltaX).
 			WithDeltaY(deltaY).
@@ -94,11 +112,11 @@ func (cdpBackend) MouseScroll(ctx context.Context, deltaX, deltaY float64) error
 
 func (cdpBackend) KeyChar(ctx context.Context, ch rune) error {
 	s := string(ch)
-	return chromedp.Run(ctx, chromedp.KeyEvent(s))
+	return dispatch(ctx, chromedp.KeyEvent(s))
 }
 
 func (cdpBackend) InsertText(ctx context.Context, text string) error {
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return cdpinput.InsertText(text).Do(ctx)
 	}))
 }
@@ -113,7 +131,7 @@ func (cdpBackend) KeyCombo(ctx context.Context, vk uint16, mods Modifier) error 
 		return fmt.Errorf("input/cdp: unsupported vk: 0x%X", vk)
 	}
 	mod := cdpModBits(mods)
-	return chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	return dispatch(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		down := cdpinput.DispatchKeyEvent(cdpinput.KeyDown).
 			WithKey(spec.key).
 			WithCode(spec.code).

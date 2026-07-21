@@ -8,7 +8,7 @@ type nativeBackend struct{}
 
 func newNative(_ Config) Backend { return &nativeBackend{} }
 
-func (nativeBackend) MouseMove(context.Context, float64, float64) error    { return ErrNotSupported }
+func (nativeBackend) MouseMove(context.Context, float64, float64) error { return ErrNotSupported }
 func (nativeBackend) MouseDown(context.Context, float64, float64, MouseButton) error {
 	return ErrNotSupported
 }

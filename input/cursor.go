@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,11 @@ const (
 // Cursor adds a human-like layer over Backend's mouse primitives.
 // Tracks position so MoveTo can interpolate from where it left off.
 type Cursor struct {
+	// mu serializes whole gestures, not individual events. A page has one
+	// pointer: two goroutines moving it at once would both race on x/y and
+	// interleave their paths, so the cursor would jump between destinations
+	// mid-gesture instead of travelling to either one.
+	mu      sync.Mutex
 	backend Backend
 	profile Profile
 	x, y    float64
@@ -52,7 +58,7 @@ func NewCursorWithProfile(b Backend, p Profile) *Cursor {
 func NewCursorWithProfileAndPath(b Backend, p Profile, mousePathURL string) *Cursor {
 	c := &Cursor{backend: b, profile: p, mousePathURL: mousePathURL}
 	if mousePathURL != "" {
-		c.httpc = &http.Client{Timeout: remotePathTimeout}
+		c.httpc = &http.Client{Timeout: remotePathTimeout, Transport: sharedRemoteTransport()}
 	}
 	return c
 }
@@ -73,6 +79,21 @@ type cursorSeeder interface {
 // MoveTo glides from the current position to (x, y). Behavior depends on the
 // configured profile (ProfileHuman by default).
 func (c *Cursor) MoveTo(ctx context.Context, x, y float64) error {
+	// Take a process-wide gesture slot BEFORE c.mu so a queued gesture never
+	// pins this page's cursor mutex while it waits. Reentrant no-op when a
+	// compound gesture already holds the slot (see AcquireGesture).
+	release, err := acquireGesture(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.moveTo(ctx, x, y)
+}
+
+// moveTo is MoveTo's body. Caller MUST hold c.mu.
+func (c *Cursor) moveTo(ctx context.Context, x, y float64) error {
 	if seeder, ok := c.backend.(cursorSeeder); ok {
 		if sx, sy, ok := seeder.OSPositionCSS(); ok {
 			c.x, c.y = sx, sy
@@ -105,6 +126,9 @@ func (c *Cursor) MoveTo(ctx context.Context, x, y float64) error {
 		// local bezier on any error / off-target result so moves never break.
 		if c.mousePathURL != "" {
 			if pts, err := fetchRemotePath(ctx, c.httpc, c.mousePathURL, c.x, c.y, x, y); err == nil && validRemotePath(pts, x, y) {
+				// Thin the dense server path to the gesture cap: validate on the
+				// full path (endpoint accuracy), then replay only the samples.
+				pts = resampleRemotePoints(pts, maxGesturePoints)
 				for _, p := range pts {
 					if err := ctx.Err(); err != nil {
 						return err
@@ -134,8 +158,17 @@ func (c *Cursor) MoveTo(ctx context.Context, x, y float64) error {
 }
 
 // Click moves to (x, y) and performs a press/release with a random hold time.
+// The move and the press/release are one gesture: nothing else may drive the
+// pointer between them, or the click lands wherever the other caller left it.
 func (c *Cursor) Click(ctx context.Context, x, y float64, b MouseButton) error {
-	if err := c.MoveTo(ctx, x, y); err != nil {
+	release, err := acquireGesture(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.moveTo(ctx, x, y); err != nil {
 		return err
 	}
 	if err := c.backend.MouseDown(ctx, x, y, b); err != nil {
@@ -147,5 +180,7 @@ func (c *Cursor) Click(ctx context.Context, x, y float64, b MouseButton) error {
 
 // Scroll dispatches a wheel event.
 func (c *Cursor) Scroll(ctx context.Context, deltaX, deltaY float64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return c.backend.MouseScroll(ctx, deltaX, deltaY)
 }

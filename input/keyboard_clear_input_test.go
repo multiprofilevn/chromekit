@@ -10,7 +10,7 @@ import (
 // assert ClearInput dispatches exactly (VKA, ModCtrl) then (VKDelete, 0).
 type recordingBackend struct {
 	combos    []comboCall
-	failOn    int   // index at which to return failErr (0 = first call); -1 = never
+	failOn    int // index at which to return failErr (0 = first call); -1 = never
 	failErr   error
 	callCount int
 }
@@ -20,7 +20,7 @@ type comboCall struct {
 	mods Modifier
 }
 
-func (r *recordingBackend) MouseMove(_ context.Context, _, _ float64) error             { return nil }
+func (r *recordingBackend) MouseMove(_ context.Context, _, _ float64) error { return nil }
 func (r *recordingBackend) MouseDown(_ context.Context, _, _ float64, _ MouseButton) error {
 	return nil
 }

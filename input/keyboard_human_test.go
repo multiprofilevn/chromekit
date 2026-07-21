@@ -11,10 +11,10 @@ import (
 // eventBackend records every KeyChar/KeyCombo invocation in order so tests
 // can assert the exact keystroke sequence TypeHuman emits.
 type eventBackend struct {
-	events       []event
-	failKeyChar  rune  // if non-zero, KeyChar(this rune) returns failErr
-	failComboVK  uint16 // if non-zero, KeyCombo(this vk) returns failErr
-	failErr      error
+	events      []event
+	failKeyChar rune   // if non-zero, KeyChar(this rune) returns failErr
+	failComboVK uint16 // if non-zero, KeyCombo(this vk) returns failErr
+	failErr     error
 }
 
 type event struct {
@@ -24,7 +24,7 @@ type event struct {
 	mods Modifier
 }
 
-func (b *eventBackend) MouseMove(_ context.Context, _, _ float64) error             { return nil }
+func (b *eventBackend) MouseMove(_ context.Context, _, _ float64) error { return nil }
 func (b *eventBackend) MouseDown(_ context.Context, _, _ float64, _ MouseButton) error {
 	return nil
 }
@@ -256,7 +256,7 @@ type bufferBackend struct {
 	buf []rune
 }
 
-func (b *bufferBackend) MouseMove(_ context.Context, _, _ float64) error             { return nil }
+func (b *bufferBackend) MouseMove(_ context.Context, _, _ float64) error { return nil }
 func (b *bufferBackend) MouseDown(_ context.Context, _, _ float64, _ MouseButton) error {
 	return nil
 }

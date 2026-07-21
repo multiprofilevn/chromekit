@@ -9,6 +9,35 @@ import (
 	"testing"
 )
 
+func TestResampleRemotePoints_CapEndpointAndDelay(t *testing.T) {
+	dense := make([]remotePoint, 300)
+	for i := range dense {
+		dense[i] = remotePoint{X: float64(i), Y: 0, Delay: float64(i)}
+	}
+	got := resampleRemotePoints(dense, maxGesturePoints)
+	if len(got) > maxGesturePoints {
+		t.Fatalf("resample len %d > cap %d", len(got), maxGesturePoints)
+	}
+	last := got[len(got)-1]
+	if last.X != 299 || last.Delay != 299 {
+		t.Errorf("endpoint (coord+delay) must be preserved, got X=%v Delay=%v", last.X, last.Delay)
+	}
+	// Each kept point keeps its own delay (delay == X in this fixture).
+	for _, p := range got {
+		if p.Delay != p.X {
+			t.Errorf("kept point delay mismatch: X=%v Delay=%v", p.X, p.Delay)
+		}
+	}
+}
+
+func TestSharedRemoteTransport_SingleInstance(t *testing.T) {
+	a := NewCursorWithProfileAndPath(&fakeBackend{}, ProfileHuman, "http://x/mouse")
+	b := NewCursorWithProfileAndPath(&fakeBackend{}, ProfileHuman, "http://y/mouse")
+	if a.httpc.Transport != b.httpc.Transport {
+		t.Fatal("two cursors should share one pooled transport")
+	}
+}
+
 func TestValidRemotePath_RejectsNonFiniteInterior(t *testing.T) {
 	pts := []remotePoint{
 		{X: 0, Y: 0},

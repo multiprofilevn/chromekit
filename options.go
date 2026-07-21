@@ -1,6 +1,23 @@
 package chromekit
 
-import "os/exec"
+import (
+	"os/exec"
+
+	"github.com/tuwibu/chromekit/input"
+)
+
+// SetGestureLimit caps how many mouse gestures run concurrently in THIS process
+// (across every Browser and Page). n <= 0 disables the cap. Default is
+// input.DefaultGestureLimit (10).
+//
+// This is the primary throughput control at scale: a mouse gesture is dozens of
+// CDP dispatches that each wait on a renderer acknowledgement, so when hundreds
+// of tabs render at once the CPU saturates and those acks — and every gesture —
+// slow to a crawl. Capping in-flight gestures keeps the active renderer set
+// small enough that acks stay fast. It is process-global, not per-Browser: with
+// one runner process per OS user, set it once at startup to roughly
+// (CPU threads / number of runner processes).
+func SetGestureLimit(n int) { input.SetGestureLimit(n) }
 
 // BackendType selects how chromekit dispatches mouse/keyboard input.
 type BackendType int

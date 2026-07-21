@@ -36,12 +36,46 @@ func TestHumanStepCount_FloorAndCap(t *testing.T) {
 	if got := humanStepCount(0, 0, 100, 0); got != 8 {
 		t.Errorf("100px = floor 8 step, got %d want 8", got)
 	}
-	if got := humanStepCount(0, 0, 5000, 0); got != 80 {
-		t.Errorf("very long distance cap, got %d want 80", got)
+	if got := humanStepCount(0, 0, 5000, 0); got != maxGesturePoints {
+		t.Errorf("very long distance cap, got %d want %d", got, maxGesturePoints)
 	}
-	mid := humanStepCount(0, 0, 500, 0)
-	if mid < 35 || mid > 50 {
-		t.Errorf("500px should be ~41 steps, got %d", mid)
+	// 500px / 12 ≈ 41, now clamped to the gesture cap.
+	if got := humanStepCount(0, 0, 500, 0); got != maxGesturePoints {
+		t.Errorf("500px should clamp to cap %d, got %d", maxGesturePoints, got)
+	}
+}
+
+func TestResamplePoints_CapAndEndpoint(t *testing.T) {
+	// Build a dense 300-point path 0..299 on X.
+	dense := make([]Point, 300)
+	for i := range dense {
+		dense[i] = Point{X: float64(i), Y: 0}
+	}
+	got := resamplePoints(dense, maxGesturePoints)
+	if len(got) > maxGesturePoints {
+		t.Fatalf("resample len %d > cap %d", len(got), maxGesturePoints)
+	}
+	if last := got[len(got)-1]; last.X != 299 {
+		t.Errorf("last point must be preserved exactly, got X=%v want 299", last.X)
+	}
+	if got[0].X != 0 {
+		t.Errorf("first sample should start at path head, got X=%v", got[0].X)
+	}
+}
+
+func TestResamplePoints_ShortUnchanged(t *testing.T) {
+	in := []Point{{X: 1}, {X: 2}, {X: 3}}
+	got := resamplePoints(in, maxGesturePoints)
+	if len(got) != 3 {
+		t.Fatalf("short path should pass through unchanged, got len %d", len(got))
+	}
+}
+
+func TestResamplePoints_CapOne(t *testing.T) {
+	in := []Point{{X: 1}, {X: 2}, {X: 3}, {X: 9}}
+	got := resamplePoints(in, 1)
+	if len(got) != 1 || got[0].X != 9 {
+		t.Fatalf("cap 1 should keep only the endpoint, got %+v", got)
 	}
 }
 

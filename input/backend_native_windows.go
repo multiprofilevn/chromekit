@@ -244,28 +244,48 @@ func (n *nativeBackend) KeyCombo(ctx context.Context, vk uint16, mods Modifier) 
 		}
 	}
 
+	// Whatever goes down must come back up, on every exit path. A SendInput
+	// failure partway through used to return with Ctrl/Alt/Shift/Win still
+	// held: the OS has no idea the sender gave up, so every keystroke in
+	// every application stays modified until a human presses that key again.
+	var down []uint16
+	defer func() {
+		for i := len(down) - 1; i >= 0; i-- {
+			// Best effort — a release that fails is not worth masking the
+			// original error, and retrying a dead SendInput will not help.
+			_ = sendVKFn(down[i], keyEventfKeyUp)
+			time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
+		}
+	}()
+
 	for _, k := range held {
-		if err := sendVK(k, 0); err != nil {
+		if err := sendVKFn(k, 0); err != nil {
 			return err
 		}
+		down = append(down, k)
 		time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
 	}
-	if err := sendVK(vk, 0); err != nil {
+	if err := sendVKFn(vk, 0); err != nil {
 		return err
 	}
+	down = append(down, vk)
 	time.Sleep(time.Duration(40+rand.Intn(40)) * time.Millisecond)
-	if err := sendVK(vk, keyEventfKeyUp); err != nil {
-		return err
-	}
-	time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
-	for i := len(held) - 1; i >= 0; i-- {
-		if err := sendVK(held[i], keyEventfKeyUp); err != nil {
-			return err
-		}
-		time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
-	}
 	return nil
 }
+
+// SerializeNativeInput runs fn holding the same lock every native input op
+// takes, so callers outside this package (Browser.Focus taps ALT through
+// keybd_event to claim foreground rights) cannot inject a keystroke into the
+// middle of another browser's click or key combo.
+func SerializeNativeInput(fn func()) {
+	nativeInputMu.Lock()
+	defer nativeInputMu.Unlock()
+	fn()
+}
+
+// sendVKFn is the indirection tests replace to drive KeyCombo's failure paths
+// without a real SendInput. Production always points at sendVK.
+var sendVKFn = sendVK
 
 // sendVK sends one keyboard event by virtual-key code (WVk field), without
 // the Unicode flag — use for modifier keys + non-character VK like Enter,
