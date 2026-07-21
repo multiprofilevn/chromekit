@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"github.com/chromedp/chromedp"
+	"github.com/tuwibu/chromekit/input"
 )
 
 var (
@@ -40,8 +42,8 @@ const (
 	vkMenu            = 0x12
 	keyEventfKeyUp    = 0x0002
 
-	mibTcpStateListen      = 2
-	tcpTableOwnerPidAll    = 5
+	mibTcpStateListen          = 2
+	tcpTableOwnerPidAll        = 5
 	afInet              uint32 = 2
 )
 
@@ -126,14 +128,26 @@ func (b *Browser) SetHWND(hwnd uintptr) {
 //     "Chrome_WidgetWin_1" whose title contains the current page title.
 //     Kept as defense-in-depth for cases where PID lookup fails.
 func (b *Browser) HWND() (uintptr, error) {
+	pid := b.resolvePID()
+
 	b.hwndMu.Lock()
 	cached := b.cachedHWND
 	b.hwndMu.Unlock()
+	// Validate before trusting the cache: the window may have closed, and
+	// Windows recycles HWND values, so a stale handle can silently resolve to
+	// an unrelated application — native input would then type into it.
 	if cached != 0 {
-		return cached, nil
+		if isVisibleChromeWindow(cached) {
+			return cached, nil
+		}
+		b.hwndMu.Lock()
+		if b.cachedHWND == cached {
+			b.cachedHWND = 0
+		}
+		b.hwndMu.Unlock()
 	}
 
-	if pid := b.resolvePID(); pid > 0 {
+	if pid > 0 {
 		if hwnd, err := findChromeWindowByPID(pid); err == nil {
 			b.hwndMu.Lock()
 			b.cachedHWND = hwnd
@@ -150,7 +164,11 @@ func (b *Browser) HWND() (uintptr, error) {
 		return 0, errors.New("hwnd: current page has empty title — navigate first or call SetHWND")
 	}
 
-	matches, err := findChromeWindowsByTitle(title)
+	// Titles come from the page, so any site can pick one. With several
+	// browsers on one machine a page can name itself after another instance's
+	// tab and steal its native input; scoping to our own process closes that.
+	// With no PID available the match stays global — documented limitation.
+	matches, err := findChromeWindowsByTitleOwnedBy(title, pid)
 	if err != nil {
 		return 0, err
 	}
@@ -223,8 +241,13 @@ func (b *Browser) Focus(ctx context.Context) error {
 	}
 
 	// Retry: tap ALT to grant our thread foreground permission, then retry.
-	procKeybdEvent.Call(uintptr(vkMenu), 0, 0, 0)
-	procKeybdEvent.Call(uintptr(vkMenu), 0, uintptr(keyEventfKeyUp), 0)
+	// Serialized with every other native input op — an unsynchronized ALT tap
+	// lands in the middle of another browser's click or key combo when several
+	// browsers share the machine, and the OS applies it to whatever has focus.
+	input.SerializeNativeInput(func() {
+		procKeybdEvent.Call(uintptr(vkMenu), 0, 0, 0)
+		procKeybdEvent.Call(uintptr(vkMenu), 0, uintptr(keyEventfKeyUp), 0)
+	})
 	procSetForegroundWindow.Call(hwnd)
 
 	deadline := time.Now().Add(200 * time.Millisecond)
@@ -282,30 +305,87 @@ func (b *Browser) currentPageTitle() (string, error) {
 	return title, nil
 }
 
-func findChromeWindowsByTitle(needle string) ([]uintptr, error) {
-	needleLower := strings.ToLower(needle)
-	var matches []uintptr
-	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		if visible, _, _ := procIsWindowVisible.Call(hwnd); visible == 0 {
-			return 1
-		}
-		if !classNameEquals(hwnd, chromeWindowClass) {
-			return 1
-		}
-		title := windowText(hwnd)
-		if title == "" {
-			return 1
-		}
-		if strings.Contains(strings.ToLower(title), needleLower) {
-			matches = append(matches, hwnd)
+// enumWindowsCB is allocated exactly once, at package init.
+//
+// syscall.NewCallback never releases its slot and Go only guarantees 1024 of
+// them per process, so building one per enumeration panics with "too many
+// callback functions" once a long-running fleet has done enough HWND lookups.
+// The Win32 callback signature has no free parameter to carry per-call state
+// (EnumWindows' lParam is spent on the callback itself), hence the package
+// vars below plus enumMu to serialize. Enumeration only runs on HWND cache
+// misses, so serializing costs nothing on the hot path.
+var (
+	enumMu      sync.Mutex
+	enumFilter  func(hwnd uintptr) bool
+	enumMatches []uintptr
+
+	enumWindowsCB = syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
+		if enumFilter(hwnd) {
+			enumMatches = append(enumMatches, hwnd)
 		}
 		return 1
 	})
-	ret, _, errno := procEnumWindows.Call(cb, 0)
-	if ret == 0 && len(matches) == 0 {
+)
+
+// enumChromeWindows runs EnumWindows and returns every window filter accepts.
+func enumChromeWindows(filter func(hwnd uintptr) bool) ([]uintptr, error) {
+	enumMu.Lock()
+	defer enumMu.Unlock()
+
+	enumFilter = filter
+	enumMatches = enumMatches[:0]
+	ret, _, errno := procEnumWindows.Call(enumWindowsCB, 0)
+	out := make([]uintptr, len(enumMatches))
+	copy(out, enumMatches)
+	enumFilter = nil
+
+	if ret == 0 && len(out) == 0 {
 		return nil, fmt.Errorf("EnumWindows: %v", errno)
 	}
-	return matches, nil
+	return out, nil
+}
+
+// isVisibleChromeWindow is the shared precondition of both lookups: a visible
+// top-level window of Chrome's own window class.
+func isVisibleChromeWindow(hwnd uintptr) bool {
+	if visible, _, _ := procIsWindowVisible.Call(hwnd); visible == 0 {
+		return false
+	}
+	return classNameEquals(hwnd, chromeWindowClass)
+}
+
+// titleMatches reports whether a window title contains needle, case-insensitively.
+// Untitled windows never match — a blank title carries no identity.
+func titleMatches(title, needle string) bool {
+	if title == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(title), strings.ToLower(needle))
+}
+
+func findChromeWindowsByTitle(needle string) ([]uintptr, error) {
+	return findChromeWindowsByTitleOwnedBy(needle, 0)
+}
+
+// findChromeWindowsByTitleOwnedBy matches on title, restricted to windows
+// owned by pid when pid is non-zero.
+func findChromeWindowsByTitleOwnedBy(needle string, pid uint32) ([]uintptr, error) {
+	return enumChromeWindows(func(hwnd uintptr) bool {
+		if !isVisibleChromeWindow(hwnd) {
+			return false
+		}
+		if pid != 0 && windowOwnerPID(hwnd) != pid {
+			return false
+		}
+		return titleMatches(windowText(hwnd), needle)
+	})
+}
+
+// windowOwnerPID returns the process id that owns hwnd.
+func windowOwnerPID(hwnd uintptr) uint32 {
+	var pid uint32
+	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	return pid
 }
 
 func classNameEquals(hwnd uintptr, want string) bool {
@@ -319,24 +399,14 @@ func classNameEquals(hwnd uintptr, want string) bool {
 // windows match (multi case = browser opened a second window from same proc;
 // caller should SetHWND explicitly).
 func findChromeWindowByPID(pid uint32) (uintptr, error) {
-	var matches []uintptr
-	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		if visible, _, _ := procIsWindowVisible.Call(hwnd); visible == 0 {
-			return 1
+	matches, err := enumChromeWindows(func(hwnd uintptr) bool {
+		if !isVisibleChromeWindow(hwnd) {
+			return false
 		}
-		if !classNameEquals(hwnd, chromeWindowClass) {
-			return 1
-		}
-		var winPID uint32
-		procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&winPID)))
-		if winPID == pid {
-			matches = append(matches, hwnd)
-		}
-		return 1
+		return windowOwnerPID(hwnd) == pid
 	})
-	ret, _, errno := procEnumWindows.Call(cb, 0)
-	if ret == 0 && len(matches) == 0 {
-		return 0, fmt.Errorf("EnumWindows: %v", errno)
+	if err != nil {
+		return 0, err
 	}
 	switch len(matches) {
 	case 0:

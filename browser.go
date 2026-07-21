@@ -3,6 +3,7 @@ package chromekit
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"sync"
 
 	"github.com/chromedp/chromedp"
@@ -16,6 +17,13 @@ type Browser struct {
 	cfg         *config
 	log         Logger
 
+	// pagesMu guards pages/current/pageCount.
+	//
+	// INVARIANT: never hold it across a CDP call (chromedp.Run, a page cancel,
+	// BringToFront, initListeners). Those round-trip to Chrome and can take
+	// seconds on a wedged tab, and every accessor here — Pages, Current,
+	// NewPage, ClosePage, the target-destroyed evictor — would queue behind
+	// them. Take the lock, mutate the bookkeeping, release, then talk to Chrome.
 	pagesMu   sync.RWMutex
 	pages     []*Page
 	current   *Page
@@ -41,6 +49,34 @@ type Browser struct {
 	// pid is the chrome browser process PID for Launch path (chromekit
 	// spawned it). 0 for Connect path — looked up from port at HWND time.
 	pid uint32
+
+	// closed is shut by Close(). Background workers select on it as well as
+	// on b.ctx, because the Connect path deliberately never cancels b.ctx —
+	// without this signal those workers would outlive the Browser.
+	closeOnce sync.Once
+	closed    chan struct{}
+
+	// doneOnce/doneCh memoize the Done() watcher so repeated Done() calls (e.g.
+	// an orchestrator health-polling hundreds of browsers) share one goroutine
+	// instead of leaking one per call until Close.
+	doneOnce sync.Once
+	doneCh   chan struct{}
+}
+
+// isClosedLocked reports whether Close() has already signalled shutdown. Caller
+// MUST hold b.pagesMu. Uses the closed channel (shut by signalClosed before
+// Close nils the page list) so it is reliable even in the window between those
+// two steps.
+func (b *Browser) isClosedLocked() bool {
+	if b.closed == nil {
+		return false
+	}
+	select {
+	case <-b.closed:
+		return true
+	default:
+		return false
+	}
 }
 
 // Launch starts Chrome with the given options and attaches to the blank page
@@ -95,12 +131,15 @@ func Launch(chromePath string, opts ...Option) (*Browser, error) {
 		return nil, err
 	}
 	b.pagesMu.Lock()
-	_, aerr := b.attachToTarget(tid, true)
+	p, aerr := b.attachToTarget(tid, true, true)
 	b.pagesMu.Unlock()
 	if aerr != nil {
 		b.Close()
 		return nil, aerr
 	}
+	// Both talk to Chrome, so they run after pagesMu is released.
+	p.initListeners()
+	b.initBrowserListeners()
 	return b, nil
 }
 
@@ -139,24 +178,39 @@ func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAlloca
 		opts = append(opts, chromedp.Flag(k, v))
 	}
 	if cfg.modifyCmd != nil {
-		opts = append(opts, chromedp.ModifyCmdFunc(cfg.modifyCmd))
+		opts = append(opts, chromedp.ModifyCmdFunc(withProcessGroupDefaults(cfg.modifyCmd)))
 	}
 	return opts
+}
+
+// withProcessGroupDefaults wraps a user hook so chromedp's own process-group
+// setup still happens. ModifyCmdFunc REPLACES chromedp's default cmd hook, and
+// that default is what puts Chrome in its own process group / death-signal —
+// the mechanism that reaps Chrome when the Go process dies without calling
+// Close(). Silently dropping it strands an orphaned browser after every crash.
+func withProcessGroupDefaults(fn func(*exec.Cmd)) func(*exec.Cmd) {
+	return func(cmd *exec.Cmd) {
+		applyProcessGroupAttrs(cmd)
+		fn(cmd)
+	}
 }
 
 // Close cancels every page, then the browser, then (for Launch) the
 // allocator. Order matters — reversing it leaks chromedp goroutines.
 //
-// For Connect (b.attached), the allocator cancel is INTENTIONALLY skipped.
-// chromedp's RemoteAllocator hardcodes a cancel-handler that sends CDP
-// Browser.close on ctx.Done(), which exits the entire chrome process —
-// hostile when chromekit doesn't own that process. Skipping allocCancel
-// keeps the chrome process alive at the cost of leaking 1 goroutine + 1
-// browser-level WebSocket per Connect/Close cycle. Acceptable for typical
-// dev workflows; long-lived processes that loop Connect/Close many times
-// should reuse a single Browser instead. A real fix needs a custom
-// allocator with chromedp's setContext (currently unexported).
+// Connect (b.attached) tears down just as completely, but detaches the tabs it
+// does not own first — see detachWithoutClosing. The distinction that matters
+// is per-tab, not per-process: cancelling a chromedp context closes THAT tab,
+// so a plain cancel would shut the tabs the user already had (and with them,
+// eventually, a Chrome chromekit never started). It is not, as an earlier
+// version of this comment claimed, a Browser.close: chromedp routes
+// RemoteAllocator contexts around that branch (first=false).
+//
+// Measured over 30 Connect/Close cycles: goroutines and heap stay flat, the
+// user's tabs and Chrome process survive.
 func (b *Browser) Close() {
+	b.signalClosed()
+
 	b.pagesMu.Lock()
 	pages := b.pages
 	b.pages = nil
@@ -164,14 +218,27 @@ func (b *Browser) Close() {
 	b.pagesMu.Unlock()
 
 	if b.attached {
-		// Cancelling ANY chromedp context derived from this Browser closes
-		// the browser-level WebSocket, which trips chromedp's
-		// LostConnection handler -> Cancel(ctx) -> CDP Browser.close ->
-		// chrome process exit. To keep chrome alive we drop references and
-		// let GC reclaim the goroutines. One goroutine + one WebSocket
-		// leak per Connect/Close cycle. Acceptable for typical dev use;
-		// production loops should reuse a single Browser.
-		_ = pages
+		// Cancelling a page context makes chromedp send Target.closeTarget for
+		// that tab. Correct for tabs chromekit opened; destructive for tabs the
+		// user already had. Detach the latter first so the cancel tears down
+		// their goroutines without touching the tab itself.
+		for i := len(pages) - 1; i >= 0; i-- {
+			p := pages[i]
+			if p.cancel == nil {
+				continue
+			}
+			if !p.owned {
+				detachWithoutClosing(p.ctx)
+			}
+			p.cancel()
+		}
+		detachWithoutClosing(b.ctx)
+		if b.cancel != nil {
+			b.cancel()
+		}
+		if b.allocCancel != nil {
+			b.allocCancel()
+		}
 		return
 	}
 
@@ -188,16 +255,75 @@ func (b *Browser) Close() {
 	}
 }
 
-// Done returns a channel that closes when the browser context is cancelled —
-// either via Close() or because the underlying chromedp context died (chrome
-// process exited / crashed). Caller can <-Done() to wait for chrome lifetime.
+// detachWithoutClosing makes a chromedp context safe to cancel without taking
+// its tab down with it.
+//
+// chromedp's per-context cleanup goroutine sends DetachFromTarget followed by
+// Target.closeTarget when the context ends — right for a tab chromedp opened,
+// destructive for one that was already there when we attached. That goroutine
+// returns early when Context.Target is nil (chromedp.go, "This is a new tab,
+// but we didn't create it and attach to it yet"), so clearing the field skips
+// the close while every goroutine still exits on cancellation.
+//
+// Only call this immediately before cancelling: it makes the context unusable
+// for further operations.
+func detachWithoutClosing(ctx context.Context) {
+	if ctx == nil {
+		return
+	}
+	if c := chromedp.FromContext(ctx); c != nil {
+		c.Target = nil
+	}
+}
+
+// signalClosed shuts the close channel exactly once. Lazily allocated so a
+// hand-constructed Browser (tests) works without an explicit constructor.
+func (b *Browser) signalClosed() {
+	b.closeOnce.Do(func() {
+		b.pagesMu.Lock()
+		if b.closed == nil {
+			b.closed = make(chan struct{})
+		}
+		ch := b.closed
+		b.pagesMu.Unlock()
+		close(ch)
+	})
+}
+
+// closeSignal returns the channel that Close shuts, allocating it on first
+// use so workers started before any Close still observe the same channel.
+func (b *Browser) closeSignal() <-chan struct{} {
+	b.pagesMu.Lock()
+	defer b.pagesMu.Unlock()
+	if b.closed == nil {
+		b.closed = make(chan struct{})
+	}
+	return b.closed
+}
+
+// Done returns a channel that closes when this Browser is finished — either
+// because Close() was called or because the underlying chromedp context died
+// (chrome exited or crashed). Caller can <-Done() to wait for either.
+//
+// Both signals matter: Close() on the Connect path leaves the caller's Chrome
+// running, so waiting on the context alone would block forever.
 func (b *Browser) Done() <-chan struct{} {
 	if b == nil || b.ctx == nil {
 		ch := make(chan struct{})
 		close(ch)
 		return ch
 	}
-	return b.ctx.Done()
+	b.doneOnce.Do(func() {
+		b.doneCh = make(chan struct{})
+		go func() {
+			defer close(b.doneCh)
+			select {
+			case <-b.ctx.Done():
+			case <-b.closeSignal():
+			}
+		}()
+	})
+	return b.doneCh
 }
 
 // PID returns the chrome browser process id captured at Launch. 0 for the

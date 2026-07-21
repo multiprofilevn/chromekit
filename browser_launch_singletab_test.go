@@ -30,7 +30,7 @@ func TestAttachToTarget_WiresPageAndSetsCurrent(t *testing.T) {
 
 	// Act — caller holds pagesMu (Phase 01 lock contract: helper does NOT lock).
 	b.pagesMu.Lock()
-	p, err := b.attachToTarget("primary", true /*primary*/)
+	p, err := b.attachToTarget("primary", true /*primary*/, true /*owned*/)
 	b.pagesMu.Unlock()
 
 	// Assert

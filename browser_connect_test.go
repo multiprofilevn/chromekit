@@ -1,6 +1,7 @@
 package chromekit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,7 @@ func TestFetchPageTargets_FiltersToPageType(t *testing.T) {
 	defer srv.Close()
 
 	port := mustPort(t, srv.URL)
-	got, err := fetchPageTargets(port)
+	got, err := fetchPageTargets(context.Background(), port)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestFetchPageTargets_EmptyListIsNotError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := fetchPageTargets(mustPort(t, srv.URL))
+	got, err := fetchPageTargets(context.Background(), mustPort(t, srv.URL))
 	if err != nil {
 		t.Fatalf("empty list should not error, got %v", err)
 	}
@@ -58,7 +59,7 @@ func TestFetchPageTargets_EmptyListIsNotError(t *testing.T) {
 
 func TestFetchPageTargets_BadPortReturnsError(t *testing.T) {
 	// Port 1 is privileged + nothing listens — connection refused.
-	_, err := fetchPageTargets(1)
+	_, err := fetchPageTargets(context.Background(), 1)
 	if err == nil {
 		t.Fatal("expected connection error, got nil")
 	}
@@ -70,7 +71,7 @@ func TestFetchPageTargets_MalformedJSONReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchPageTargets(mustPort(t, srv.URL))
+	_, err := fetchPageTargets(context.Background(), mustPort(t, srv.URL))
 	if err == nil {
 		t.Fatal("expected decode error, got nil")
 	}

@@ -12,16 +12,16 @@ import (
 type Permission string
 
 const (
-	PermissionGeolocation           Permission = "geolocation"
-	PermissionCamera                Permission = "camera"
-	PermissionMicrophone            Permission = "microphone"
-	PermissionNotifications         Permission = "notifications"
-	PermissionClipboardRead         Permission = "clipboard-read"
-	PermissionClipboardWrite        Permission = "clipboard-write"
-	PermissionMIDI                  Permission = "midi"
-	PermissionMIDISysex             Permission = "midi-sysex"
-	PermissionBackgroundSync        Permission = "background-sync"
-	PermissionPersistentStorage     Permission = "persistent-storage"
+	PermissionGeolocation       Permission = "geolocation"
+	PermissionCamera            Permission = "camera"
+	PermissionMicrophone        Permission = "microphone"
+	PermissionNotifications     Permission = "notifications"
+	PermissionClipboardRead     Permission = "clipboard-read"
+	PermissionClipboardWrite    Permission = "clipboard-write"
+	PermissionMIDI              Permission = "midi"
+	PermissionMIDISysex         Permission = "midi-sysex"
+	PermissionBackgroundSync    Permission = "background-sync"
+	PermissionPersistentStorage Permission = "persistent-storage"
 )
 
 // GrantPermissions auto-approves the listed permissions for origin so the

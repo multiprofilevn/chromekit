@@ -33,7 +33,7 @@ func Connect(port int, opts ...Option) (*Browser, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets, err := fetchPageTargets(port)
+	targets, err := fetchPageTargets(context.Background(), port)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list targets: %s", ErrInvalidConfig, err.Error())
 	}
@@ -58,9 +58,25 @@ func Connect(port int, opts ...Option) (*Browser, error) {
 		}
 		b.ctx = ctx
 		b.cancel = cancel
-		// Refresh target list so attachAdditionalPages picks up the spawned tab.
-		spawned, _ := fetchPageTargets(port)
-		b.attachKnownTargets(spawned, "")
+		// Take the spawned target's id straight from the context chromedp just
+		// bound. Re-listing and diffing would race any tab opened meanwhile on
+		// a shared debug port, and passing an empty primaryID below used to
+		// leave this target attached twice — once as b.ctx, once as its own
+		// sub-context — so closing it killed the browser context.
+		spawnedID, err := resolveLaunchTarget(ctx)
+		if err != nil {
+			cancel()
+			allocCancel()
+			return nil, err
+		}
+		spawned, err := fetchPageTargets(context.Background(), port)
+		if err != nil {
+			cancel()
+			allocCancel()
+			return nil, fmt.Errorf("%w: list targets after spawn: %s", ErrInvalidConfig, err.Error())
+		}
+		b.attachKnownTargets(spawned, spawnedID)
+		b.initBrowserListeners()
 		return b, nil
 	}
 
@@ -80,6 +96,7 @@ func Connect(port int, opts ...Option) (*Browser, error) {
 	b.ctx = primaryCtx
 	b.cancel = primaryCancel
 	b.attachKnownTargets(targets, primary.ID)
+	b.initBrowserListeners()
 	return b, nil
 }
 
@@ -88,12 +105,22 @@ func Connect(port int, opts ...Option) (*Browser, error) {
 // every other target gets its own sub-context.
 func (b *Browser) attachKnownTargets(targets []targetEntry, primaryID string) {
 	b.pagesMu.Lock()
-	defer b.pagesMu.Unlock()
+	attached := make([]*Page, 0, len(targets))
 	for _, t := range targets {
 		// attachToTarget owns the primary/current selection rule (primary
 		// wins; first non-primary only if current still nil) — identical to
 		// the previous inlined logic. Caller holds b.pagesMu per its contract.
-		_, _ = b.attachToTarget(t.ID, t.ID == primaryID)
+		if p, err := b.attachToTarget(t.ID, t.ID == primaryID, false); err == nil {
+			attached = append(attached, p)
+		}
+	}
+	b.pagesMu.Unlock()
+
+	// Enabling each page's CDP domains is a network round-trip per tab; keep
+	// it off pagesMu so a slow or already-dead target cannot stall every
+	// Pages/Current/NewPage caller while Connect finishes wiring up.
+	for _, p := range attached {
+		p.initListeners()
 	}
 }
 
@@ -131,10 +158,17 @@ type targetEntry struct {
 
 // fetchPageTargets enumerates Chrome targets via raw /json/list and returns
 // only entries with type == "page" in source order.
-func fetchPageTargets(port int) ([]targetEntry, error) {
+func fetchPageTargets(ctx context.Context, port int) ([]targetEntry, error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d/json/list", port)
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
+	// The caller's deadline wins: a 5s client timeout would otherwise let a
+	// hung endpoint blow straight past a short WaitForNewPage budget.
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
