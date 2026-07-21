@@ -9,7 +9,9 @@ import (
 )
 
 // Start Chrome first with a debug port + visible window, e.g.:
-//   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\tmp\profile
+//
+//	chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\tmp\profile
+//
 // Native input only works on Windows with the Chrome window focused.
 // WithNativeWindow tells chromekit where the window sits on screen so DOM
 // coordinates can be converted to absolute screen pixels.

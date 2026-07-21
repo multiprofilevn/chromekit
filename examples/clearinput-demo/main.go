@@ -3,7 +3,8 @@
 // then runs ClearInput and pauses again so you can confirm the field is empty.
 //
 // Run from project root:
-//   go run ./examples/clearinput-demo
+//
+//	go run ./examples/clearinput-demo
 package main
 
 import (

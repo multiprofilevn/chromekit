@@ -67,7 +67,7 @@ b, _ := chromekit.Launch(
 | Browser  | `Launch(chromePath, opts ...Option)`           | spawn a new Chrome process at chromePath (or `""` for default lookup) |
 | Browser  | `NewPage()` / `Pages()` / `Current()`          | manage tabs                               |
 | Browser  | `SwitchPageByIndex/URL/Origin`                 | switch active tab                         |
-| Browser  | `ClosePage(id)` / `Close()`                    | clean teardown                            |
+| Browser  | `ClosePage(id)` / `Close()`                    | clean teardown (see note below)           |
 | Page     | `Navigate(url, timeout)` / `Reload` / `GoBack` / `GoForward` | navigation             |
 | Page     | `WaitForReady` / `WaitForSelector` / `WaitForChangeURL` / `WaitForFunction` | sync |
 | Page     | `Click(sel)` / `ClickElement(sel)` / `Type(sel, text)` / `Hover(sel)` | high-level shortcut |
@@ -84,6 +84,15 @@ b, _ := chromekit.Launch(
 | Page     | `Storage().Local()/Session()` → `Get/Set/Remove/Clear` | web storage                       |
 | Page     | `Downloads()` → `SetPath/Wait`                 | download interception                     |
 | Browser  | `GrantPermissions(origin, perms...)` / `ResetPermissions()` | permission overrides         |
+
+### Closing the primary page
+
+The first tab chromekit binds on `Launch` / `Connect` (the *primary* page) shares
+its context with the `Browser` itself. `ClosePage(primaryID)` and
+`primary.Close()` therefore refuse to run — cancelling that context would take
+every other tab with it, and on the `Launch` path kill the Chrome process.
+`ClosePage` returns `ErrCannotClosePrimaryPage`; `ClosePagesNotMatching` skips
+the primary regardless of URL. Use `b.Close()` to shut the browser down.
 
 ## Options
 

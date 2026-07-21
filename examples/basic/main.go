@@ -9,7 +9,9 @@ import (
 )
 
 // Start Chrome first with a debug port, e.g.:
-//   chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\tmp\profile
+//
+//	chrome.exe --remote-debugging-port=9222 --user-data-dir=C:\tmp\profile
+//
 // Then run this example to attach.
 func main() {
 	b, err := chromekit.Connect(9222)

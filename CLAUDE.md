@@ -26,6 +26,20 @@ Rules live in `./.claude/rules/` — auto-loaded per skill.
 - **DO NOT** use `chore` / `docs` for files under `.claude/`.
 - Clean messages, no AI references.
 
+### Branch Policy (MANDATORY — NO EXCEPTIONS)
+- **NEVER auto-create branches.** Default: commit & push directly to the project's **main branch** (`main` or `master` — auto-detect, don't assume).
+- Only create a branch when the user **explicitly** asks (e.g. "tách branch", "tạo nhánh mới", "create a branch").
+- When a branch IS requested, **DO NOT** silently pick a name. Use `AskUserQuestion` to offer 2-3 candidate branch names (per `.claude/rules/branch-policy.md`) + let the user type their own; only create after they choose.
+- Detect main branch: `git symbolic-ref refs/remotes/origin/HEAD | sed 's@^refs/remotes/origin/@@'`, fallback to whichever of `main`/`master` exists.
+- Full contract: `.claude/rules/branch-policy.md`.
+
+## Docs Output Location (during plan/cook)
+- User says "write docs" **while a plan is active or during `cook`** with **NO folder named** → write the doc file straight into the **active plan directory** (flat, kebab-case), e.g. `plans/260706-0643-channel-growth-and-youtube-scan/frontend-api-channel-growth.md`. These are API/feature docs for a sibling project (e.g. admin) to reference.
+- User **names a specific folder** ("write to docs folder", any path) → follow that exact location.
+- Structured `/docs` subcommands (`init`/`update`/`services`/`flows`) → keep their `./docs/**` targets as before.
+- NEVER dump ad-hoc docs into `./docs` during plan/cook unless the user names it.
+- Full contract: `.claude/rules/docs-output-location.md`.
+
 ## Python scripts in `.claude/skills/`
 Use venv Python:
 - Linux/macOS: `.claude/skills/.venv/bin/python3 scripts/xxx.py`
@@ -47,7 +61,7 @@ Script fails → fix directly, don't stop.
 - Orphans (unused import/var/function) created BY YOUR change → remove. Pre-existing dead code → leave alone.
 
 ## API Response Contract
-Project có internal API trả envelope `{success, data?, message?}` → tuân thủ `./.claude/rules/api-response-contract.md`. KHÔNG đọc `response.data.data` thủ công, KHÔNG dùng pattern `?? response.data` defensive, KHÔNG gọi axios raw ở file feature. Dùng wrapper unwrap (vd `apiGet/apiPost`) hoặc tạo wrapper nếu chưa có.
+When the project has an internal API returning an envelope `{success, data?, message?}` → follow `./.claude/rules/api-response-contract.md`. DO NOT read `response.data.data` manually, DO NOT use the defensive `?? response.data` pattern, DO NOT call raw axios in feature files. Use an unwrap wrapper (e.g. `apiGet/apiPost`), or create one if none exists.
 
 ## Privacy Block Hook
 Tool call blocked (`@@PRIVACY_PROMPT@@`) → see `./.claude/rules/privacy-block-hook.md`.

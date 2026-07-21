@@ -12,6 +12,70 @@ Both methods are integration-tested (build tag `integration`).
 
 ## [Unreleased]
 
+### Fixed — leak & concurrency audit (2026-07-20)
+
+Findings from a full leak/goroutine/handle audit, each verified against real
+Chrome. Measurements are goroutine counts from the stress harness.
+
+| Area | Before | After |
+|---|---|---|
+| Tab closed by the page / user (`window.close()`, OAuth popup) | `Page` never removed; +3 goroutines and ~15KB per tab, forever | evicted within ~1s; counts flat over 50 closes |
+| `NewPage` → `ClosePage` churn | already clean | unchanged (regression-tested) |
+| `Connect`/`Close` cycle | ~7 goroutines + ~30KB | flat over 30 cycles |
+
+- **Closing the primary tab no longer kills the browser.** The first tab shares
+  its context with the `Browser`, so `ClosePage`/`Page.Close` on it cancelled
+  every sibling and, on the `Launch` path, the Chrome process.
+  `ClosePagesNotMatching` hit this routinely. Both now return
+  `ErrCannotClosePrimaryPage`; `ClosePagesNotMatching` skips it.
+- **Externally destroyed tabs are cleaned up.** Browser-level
+  `Target.targetDestroyed` subscription, with target discovery enabled
+  explicitly so it also works on the `Connect` path (chromedp only enables it
+  for connections it bootstraps itself).
+- **`pagesMu` is never held across a CDP call.** `SwitchPageByIndex` used to
+  hold the write lock through `BringToFront`'s three-second activation poll,
+  stalling every `Pages`/`Current`/`NewPage`/`ClosePage` caller meanwhile.
+- **Mouse and input operations are bounded.** Every CDP input dispatch carries a
+  5s timeout — `Input.dispatchMouseEvent` only acknowledges once the renderer
+  consumes it, so a wedged tab parked whole gestures indefinitely. `Navigate`
+  and friends now apply their `timeout` to the navigation itself, not only the
+  readiness wait; `Click`/`Type` gained `DefaultActionTimeout`.
+- **`Cursor` serializes gestures.** Concurrent `MoveTo` on one page was a data
+  race on the tracked position and interleaved two paths into one jittering
+  cursor.
+- **Dialog handlers no longer run on chromedp's dispatch goroutine.** A handler
+  that called back into its own page deadlocked the tab permanently, freezing
+  every pending CDP reply including in-flight mouse acknowledgements.
+- **Console handlers are bounded** (8 concurrent, messages truncated at 4KB) —
+  a page in a `console.log` loop could previously spawn goroutines without limit.
+- **`Downloads().Wait()`** discards events from downloads that already finished
+  unwaited, so it no longer returns a previous download's filename, and
+  snapshots its channel so it cannot race `SetPath`. Events belonging to the
+  download currently being waited on are kept — Chrome reports
+  `downloadWillBegin` asynchronously, so they often arrive before `Wait` is
+  entered.
+- **Frame cache** keeps its dirty flag when the tree changes mid-rebuild, and
+  `Frame.IsAttached()` now actually flips to false on detach.
+- **Native input on Windows**: modifiers are released on every exit path (a
+  mid-combo `SendInput` failure left Ctrl/Alt/Shift stuck down system-wide);
+  `Focus`'s ALT tap is serialized with other input; `syscall.NewCallback` is
+  allocated once instead of per lookup (Go guarantees only 1024 slots, so a
+  long-running fleet eventually panicked); cached `HWND` is validated before
+  use and title matching is scoped to the browser's own PID.
+- **`Connect`/`Close` releases everything and keeps the user's tabs.** Cancelling
+  a chromedp context closes the tab bound to it, so `Close()` used to skip
+  cancellation entirely and leak the whole connection — roughly 7 goroutines per
+  cycle. It now detaches tabs it does not own from chromedp before cancelling
+  (`Context.Target = nil` makes chromedp's cleanup skip `Target.closeTarget`),
+  so teardown is complete while the user's tabs and Chrome process survive. The
+  older explanation that cancelling triggered `Browser.close` was wrong:
+  chromedp routes `RemoteAllocator` contexts around that branch.
+- **`Browser.Done()` closes after `Close()` on the Connect path.** It only
+  followed the chromedp context, which that path deliberately never cancelled,
+  so anything waiting on `<-b.Done()` blocked forever.
+- `WithModifyCmd` no longer silently drops chromedp's process-group setup, which
+  is what reaps Chrome when the Go process dies abruptly.
+
 ### Added
 
 #### Exec Hook & Input Backend Getter
