@@ -78,5 +78,7 @@ func (p *Page) ClickElement(selector string) error {
 	x := box.Left + inset + rand.Float64()*(box.Width-inset*2)
 	y := box.Top + inset + rand.Float64()*(box.Height-inset*2)
 	p.initInput()
-	return p.cursor.Click(p.ctx, x, y, input.MouseLeft)
+	ctx, cancel := opCtx(p.ctx, 0)
+	defer cancel()
+	return p.cursor.Click(ctx, x, y, input.MouseLeft)
 }

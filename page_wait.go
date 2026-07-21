@@ -21,7 +21,13 @@ func (p *Page) WaitForReady(timeout time.Duration) error {
 	}
 	ctx, cancel := context.WithTimeout(p.ctx, timeout)
 	defer cancel()
+	return p.waitReadyWithin(ctx)
+}
 
+// waitReadyWithin polls readyState until ctx expires. Split out so the
+// navigation calls can share ONE deadline across both the navigate action and
+// the readiness wait, instead of giving each its own full budget.
+func (p *Page) waitReadyWithin(ctx context.Context) error {
 	for {
 		var ready bool
 		err := chromedp.Run(ctx, chromedp.Evaluate(`document.readyState === "complete"`, &ready))

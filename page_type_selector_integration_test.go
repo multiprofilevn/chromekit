@@ -136,4 +136,3 @@ func bootIntegrationPage(t *testing.T, url string) *Page {
 	}
 	return p
 }
-

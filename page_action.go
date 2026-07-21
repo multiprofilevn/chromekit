@@ -14,7 +14,9 @@ func (p *Page) Click(selector string) error {
 	if err := p.alive(); err != nil {
 		return err
 	}
-	if err := chromedp.Run(p.ctx, chromedp.Click(selector, chromedp.ByQuery)); err != nil {
+	ctx, cancel := opCtx(p.ctx, 0)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.Click(selector, chromedp.ByQuery)); err != nil {
 		return fmt.Errorf("%w: click %q: %s", ErrEvaluate, selector, err.Error())
 	}
 	return nil
@@ -26,7 +28,9 @@ func (p *Page) Type(selector, text string) error {
 	if err := p.alive(); err != nil {
 		return err
 	}
-	if err := chromedp.Run(p.ctx, chromedp.SendKeys(selector, text, chromedp.ByQuery)); err != nil {
+	ctx, cancel := opCtx(p.ctx, 0)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.SendKeys(selector, text, chromedp.ByQuery)); err != nil {
 		return fmt.Errorf("%w: type %q: %s", ErrEvaluate, selector, err.Error())
 	}
 	return nil

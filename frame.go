@@ -240,6 +240,14 @@ func (p *Page) FrameByName(name string) (*Frame, error) {
 // rebuildFrames calls Page.getFrameTree and walks it depth-first into the
 // cache, preserving execution-context attachment from prior runs.
 func (p *Page) rebuildFrames() error {
+	// Snapshot the invalidation counter before the round-trip. Events that
+	// arrive while getFrameTree is in flight describe a tree newer than the
+	// one we are about to cache, so clearing the dirty flag unconditionally
+	// would pin Frames() to a stale view for the rest of the page's life.
+	p.frameMu.RLock()
+	genAtStart := p.frameGen
+	p.frameMu.RUnlock()
+
 	var tree *cdppage.FrameTree
 	err := chromedp.Run(p.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		t, err := cdppage.GetFrameTree().Do(ctx)
@@ -256,7 +264,10 @@ func (p *Page) rebuildFrames() error {
 	walkFrameTree(tree, p, &out)
 	p.frameMu.Lock()
 	p.framesCache = out
-	p.framesDirty = false
+	// Only declare the cache clean if nothing invalidated it mid-fetch.
+	if p.frameGen == genAtStart {
+		p.framesDirty = false
+	}
 	p.frameMu.Unlock()
 	return nil
 }

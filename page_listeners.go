@@ -45,7 +45,9 @@ func (p *Page) dispatchEvent(ev any) {
 		p.handleDownloadBegin(e)
 	case *browser.EventDownloadProgress:
 		p.handleDownloadProgress(e)
-	case *cdppage.EventFrameAttached, *cdppage.EventFrameDetached, *cdppage.EventFrameNavigated:
+	case *cdppage.EventFrameDetached:
+		p.detachFrame(string(e.FrameID))
+	case *cdppage.EventFrameAttached, *cdppage.EventFrameNavigated:
 		p.markFramesDirty()
 	case *runtime.EventExecutionContextCreated:
 		p.recordContext(e)
@@ -59,6 +61,23 @@ func (p *Page) dispatchEvent(ev any) {
 func (p *Page) markFramesDirty() {
 	p.frameMu.Lock()
 	p.framesDirty = true
+	// Bumped on every invalidation so rebuildFrames can tell whether the tree
+	// changed while it was fetching, and refuse to mark a stale result clean.
+	p.frameGen++
+	p.frameMu.Unlock()
+}
+
+// detachFrame marks a frame gone so IsAttached reports it, rather than leaving
+// every cached frame permanently "attached".
+func (p *Page) detachFrame(id string) {
+	p.frameMu.Lock()
+	for _, f := range p.framesCache {
+		if f.id == id {
+			f.attached = false
+		}
+	}
+	p.framesDirty = true
+	p.frameGen++
 	p.frameMu.Unlock()
 }
 
@@ -117,28 +136,45 @@ func (p *Page) handleDialog(ev *cdppage.EventJavascriptDialogOpening) {
 	h := p.dialogHandler
 	p.listenerMu.RUnlock()
 
-	action := DialogAction{Accept: false}
-	if h != nil {
-		action = h(DialogEvent{
-			Type:          DialogType(ev.Type),
-			Message:       ev.Message,
-			DefaultPrompt: ev.DefaultPrompt,
-		})
+	e := DialogEvent{
+		Type:          DialogType(ev.Type),
+		Message:       ev.Message,
+		DefaultPrompt: ev.DefaultPrompt,
 	}
-	// Dispatcher must not block — the JS dialog handler call lives off the
-	// event-loop goroutine.
-	go func(a DialogAction) {
-		req := cdppage.HandleJavaScriptDialog(a.Accept)
-		if a.PromptText != "" {
-			req = req.WithPromptText(a.PromptText)
+	// The user handler runs on its own goroutine, NOT on chromedp's event-
+	// dispatch goroutine. Calling it inline deadlocks the moment a handler
+	// touches the page (Evaluate, GetURL): the response it waits for can only
+	// be processed by the very goroutine the handler is blocking. That freeze
+	// takes the whole tab with it — every pending CDP reply, including the
+	// mouse-move acknowledgements of an in-flight gesture.
+	go func() {
+		// Skip if the page is already gone — the dialog reply below would fail
+		// on a dead context anyway, and there is no point running the handler.
+		if p.ctx.Err() != nil {
+			return
+		}
+		action := DialogAction{Accept: false}
+		if h != nil {
+			action = h(e)
+		}
+		req := cdppage.HandleJavaScriptDialog(action.Accept)
+		if action.PromptText != "" {
+			req = req.WithPromptText(action.PromptText)
 		}
 		_ = chromedp.Run(p.ctx, req)
-	}(action)
+	}()
 }
+
+// maxConsoleTextLen caps a single console message. Page scripts choose both
+// how many messages to emit and how big each one is; without a cap, one
+// console.log of a huge string is an unbounded allocation triggered from the
+// page.
+const maxConsoleTextLen = 4096
 
 func (p *Page) handleConsole(ev *runtime.EventConsoleAPICalled) {
 	p.listenerMu.RLock()
 	h := p.consoleHandler
+	sem := p.consoleSem
 	p.listenerMu.RUnlock()
 	if h == nil {
 		return
@@ -147,9 +183,30 @@ func (p *Page) handleConsole(ev *runtime.EventConsoleAPICalled) {
 	for _, a := range ev.Args {
 		parts = append(parts, formatRemoteObject(a))
 	}
-	text := joinSpace(parts)
-	level := mapConsoleLevel(string(ev.Type))
-	go h(ConsoleEvent{Level: level, Text: text})
+	text := truncateConsoleText(joinSpace(parts))
+	e := ConsoleEvent{Level: mapConsoleLevel(string(ev.Type)), Text: text}
+
+	// Don't spawn a handler for a page that's already tearing down.
+	if p.ctx.Err() != nil {
+		return
+	}
+	// Bounded fan-out. A page in a console.log loop would otherwise spawn a
+	// goroutine per message; drop instead, the way DevTools does.
+	select {
+	case sem <- struct{}{}:
+		go func() {
+			defer func() { <-sem }()
+			h(e)
+		}()
+	default:
+	}
+}
+
+func truncateConsoleText(s string) string {
+	if len(s) <= maxConsoleTextLen {
+		return s
+	}
+	return s[:maxConsoleTextLen] + "…(truncated)"
 }
 
 // formatRemoteObject renders one runtime.RemoteObject the way DevTools'
@@ -186,29 +243,39 @@ func joinSpace(parts []string) string {
 	return out
 }
 
+// downloadChan snapshots the download channel under the listener lock so
+// dispatch never races SetPath swapping it.
+func (p *Page) downloadChan() chan downloadEvent {
+	p.listenerMu.RLock()
+	defer p.listenerMu.RUnlock()
+	return p.downloadCh
+}
+
 func (p *Page) handleDownloadBegin(ev *browser.EventDownloadWillBegin) {
-	if p.downloadCh == nil {
+	ch := p.downloadChan()
+	if ch == nil {
 		return
 	}
 	select {
-	case p.downloadCh <- downloadEvent{Filename: ev.SuggestedFilename}:
+	case ch <- downloadEvent{Filename: ev.SuggestedFilename}:
 	default: // channel full — caller didn't WaitForDownload, drop and continue
 	}
 }
 
 func (p *Page) handleDownloadProgress(ev *browser.EventDownloadProgress) {
-	if p.downloadCh == nil {
+	ch := p.downloadChan()
+	if ch == nil {
 		return
 	}
 	switch ev.State {
 	case browser.DownloadProgressStateCompleted:
 		select {
-		case p.downloadCh <- downloadEvent{Done: true}:
+		case ch <- downloadEvent{Done: true}:
 		default:
 		}
 	case browser.DownloadProgressStateCanceled:
 		select {
-		case p.downloadCh <- downloadEvent{Done: true, Err: ErrDownloadCanceled}:
+		case ch <- downloadEvent{Done: true, Err: ErrDownloadCanceled}:
 		default:
 		}
 	}
@@ -228,4 +295,3 @@ func mapConsoleLevel(t string) ConsoleLevel {
 		return ConsoleLog
 	}
 }
-

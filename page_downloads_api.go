@@ -48,6 +48,26 @@ func (d *DownloadsAPI) SetPath(dir string) error {
 	return nil
 }
 
+// dropFinishedDownloads removes every complete Begin→Done run from a batch of
+// buffered events and returns what is left.
+//
+// A Done event ends a download, so everything up to and including the last one
+// belongs to downloads that already finished — stale by definition, since the
+// caller was not waiting on them. Anything after it is the download in flight
+// now, whose events merely arrived early.
+func dropFinishedDownloads(events []downloadEvent) []downloadEvent {
+	lastDone := -1
+	for i, ev := range events {
+		if ev.Done {
+			lastDone = i
+		}
+	}
+	if lastDone < 0 {
+		return events
+	}
+	return events[lastDone+1:]
+}
+
 // Wait blocks until a download started on this page completes (or is
 // canceled) or timeout fires. Returns the suggested filename Chrome
 // reported when the download began, relative to the directory passed to
@@ -56,19 +76,47 @@ func (d *DownloadsAPI) SetPath(dir string) error {
 // Subsequent downloads queue in a 16-slot channel — call Wait promptly
 // after the trigger to avoid dropping events.
 func (d *DownloadsAPI) Wait(timeout time.Duration) (string, error) {
-	if d.p.downloadCh == nil {
+	// Snapshot the channel under the lock and watch that one for the whole
+	// wait: SetPath can swap it concurrently, and re-reading the field on
+	// every loop iteration is both a data race and a way to start listening
+	// to an empty channel halfway through a download.
+	d.p.listenerMu.RLock()
+	ch := d.p.downloadCh
+	d.p.listenerMu.RUnlock()
+	if ch == nil {
 		return "", fmt.Errorf("%w: SetPath not called", ErrInvalidConfig)
 	}
 	if timeout <= 0 {
 		timeout = defaultWaitTimeout
 	}
+	// Discard downloads that already finished without anyone waiting on them,
+	// or this call resolves with a previous download's filename. Events for
+	// the download being waited on now are put back: Chrome reports
+	// downloadWillBegin asynchronously, so they routinely arrive before Wait
+	// is even entered — draining those would turn a success into a timeout.
+	var buffered []downloadEvent
+	for {
+		select {
+		case ev := <-ch:
+			buffered = append(buffered, ev)
+			continue
+		default:
+		}
+		break
+	}
+	var filename string
+	for _, ev := range dropFinishedDownloads(buffered) {
+		if ev.Filename != "" {
+			filename = ev.Filename
+		}
+	}
+
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
-	var filename string
 	for {
 		select {
-		case ev := <-d.p.downloadCh:
+		case ev := <-ch:
 			if ev.Filename != "" {
 				filename = ev.Filename
 			}

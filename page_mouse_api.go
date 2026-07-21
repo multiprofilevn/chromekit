@@ -27,13 +27,17 @@ const (
 // p.ClickElement(sel) stay on Page so common automation reads naturally.
 type MouseAPI struct{ p *Page }
 
-// MoveTo glides the cursor to (x, y) in viewport CSS pixels.
+// MoveTo glides the cursor to (x, y) in viewport CSS pixels. Bounded by
+// DefaultActionTimeout (including any time spent queued behind the gesture
+// limiter), so a wedged renderer fails the move instead of hanging forever.
 func (m *MouseAPI) MoveTo(x, y float64) error {
 	if err := m.p.alive(); err != nil {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.MoveTo(m.p.ctx, x, y)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.MoveTo(ctx, x, y)
 }
 
 // ClickAt clicks at (x, y) with the left button.
@@ -42,7 +46,9 @@ func (m *MouseAPI) ClickAt(x, y float64) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.Click(m.p.ctx, x, y, input.MouseLeft)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.Click(ctx, x, y, input.MouseLeft)
 }
 
 // Scroll dispatches a wheel event with the given deltas.
@@ -51,7 +57,9 @@ func (m *MouseAPI) Scroll(deltaX, deltaY float64) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.Scroll(m.p.ctx, deltaX, deltaY)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.Scroll(ctx, deltaX, deltaY)
 }
 
 // Tap dispatches a touch tap at (x, y).
@@ -60,7 +68,9 @@ func (m *MouseAPI) Tap(x, y float64) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.touch.Tap(m.p.ctx, x, y)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.touch.Tap(ctx, x, y)
 }
 
 // Click moves the cursor to the center of the element matching selector with
@@ -72,7 +82,9 @@ func (m *MouseAPI) Click(selector string) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.Click(m.p.ctx, x, y, input.MouseLeft)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.Click(ctx, x, y, input.MouseLeft)
 }
 
 // FocusElement scrolls the element into view, performs a human-like click on
@@ -97,7 +109,9 @@ func (m *MouseAPI) FocusElement(selector string) error {
 	if err := m.p.Evaluate(expr, &focused); err == nil && focused {
 		return nil
 	}
-	if err := chromedp.Run(m.p.ctx, chromedp.Focus(selector, chromedp.ByQuery)); err != nil {
+	fctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	if err := chromedp.Run(fctx, chromedp.Focus(selector, chromedp.ByQuery)); err != nil {
 		return fmt.Errorf("%w: focus %q: %s", ErrEvaluate, selector, err.Error())
 	}
 	return nil
@@ -111,22 +125,43 @@ func (m *MouseAPI) Hover(selector string) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.MoveTo(m.p.ctx, x, y)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.MoveTo(ctx, x, y)
 }
 
 // DoubleClick fires two left clicks at the element's center within ~120ms —
 // the standard double-click window in browsers.
+//
+// The gesture holds one process-wide limiter slot across both clicks, but NOT
+// Cursor.mu for the whole window — c.mu is taken and released per Click. The
+// clicks still land on the fixed x,y (passed by value), but a caller driving
+// the same page's Cursor from another goroutine mid-DoubleClick can move the
+// pointer between the two clicks. As elsewhere, one Cursor is meant to be
+// driven from a single goroutine.
 func (m *MouseAPI) DoubleClick(selector string) error {
 	x, y, err := m.p.elementClickPoint(selector)
 	if err != nil {
 		return err
 	}
 	m.p.initInput()
-	if err := m.p.cursor.Click(m.p.ctx, x, y, input.MouseLeft); err != nil {
+	opctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	// Hold ONE gesture slot across both clicks. Otherwise the second Click
+	// queues independently behind the process-wide limiter, and under load its
+	// wait can exceed the double-click window — the browser then sees two
+	// separate single clicks instead of a double click. The deadline bounds the
+	// slot wait too (opCtx wraps the acquire).
+	ctx, release, err := input.AcquireGesture(opctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := m.p.cursor.Click(ctx, x, y, input.MouseLeft); err != nil {
 		return err
 	}
 	time.Sleep(60 * time.Millisecond)
-	return m.p.cursor.Click(m.p.ctx, x, y, input.MouseLeft)
+	return m.p.cursor.Click(ctx, x, y, input.MouseLeft)
 }
 
 // RightClick clicks the element's center with the right mouse button. Most
@@ -138,7 +173,9 @@ func (m *MouseAPI) RightClick(selector string) error {
 		return err
 	}
 	m.p.initInput()
-	return m.p.cursor.Click(m.p.ctx, x, y, input.MouseRight)
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.Click(ctx, x, y, input.MouseRight)
 }
 
 // DragAndDrop holds the left button down at fromSel's center, glides through
@@ -164,10 +201,19 @@ func (m *MouseAPI) Drag(fromX, fromY, toX, toY float64) error {
 		return err
 	}
 	m.p.initInput()
-	if err := m.p.cursor.MoveTo(m.p.ctx, fromX, fromY); err != nil {
+	opctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	// One gesture slot for the whole press → intermediate moves → release, so
+	// the drag is never split apart by the process-wide limiter mid-flight.
+	ctx, release, err := input.AcquireGesture(opctx)
+	if err != nil {
 		return err
 	}
-	if err := m.p.backend.MouseDown(m.p.ctx, fromX, fromY, input.MouseLeft); err != nil {
+	defer release()
+	if err := m.p.cursor.MoveTo(ctx, fromX, fromY); err != nil {
+		return err
+	}
+	if err := m.p.backend.MouseDown(ctx, fromX, fromY, input.MouseLeft); err != nil {
 		return err
 	}
 	dx := (toX - fromX) / float64(dragSteps)
@@ -175,13 +221,13 @@ func (m *MouseAPI) Drag(fromX, fromY, toX, toY float64) error {
 	for i := 1; i <= dragSteps; i++ {
 		x := fromX + dx*float64(i)
 		y := fromY + dy*float64(i)
-		if err := m.p.backend.MouseMove(m.p.ctx, x, y); err != nil {
-			_ = m.p.backend.MouseUp(m.p.ctx, x, y, input.MouseLeft)
+		if err := m.p.backend.MouseMove(ctx, x, y); err != nil {
+			_ = m.p.backend.MouseUp(ctx, x, y, input.MouseLeft)
 			return err
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	return m.p.backend.MouseUp(m.p.ctx, toX, toY, input.MouseLeft)
+	return m.p.backend.MouseUp(ctx, toX, toY, input.MouseLeft)
 }
 
 // settleMinMs / settleMaxMs cover smooth-scroll animation durations (Twitter,

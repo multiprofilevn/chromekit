@@ -61,6 +61,12 @@ const readableValueJS = `el => {
 //
 // Selector must be present in the DOM at call time — wrap with WaitForSelector
 // if it appears asynchronously.
+//
+// Deliberately NOT bounded by DefaultActionTimeout: human-paced typing runs
+// 80-220ms per character and may retry MaxAttempts times, so a long field can
+// legitimately exceed any fixed budget. Hangs are prevented one level down,
+// where each individual CDP dispatch carries its own timeout. Wrap the call
+// yourself if your flow needs a hard ceiling.
 func (k *KeyboardAPI) TypeSelector(selector, text string, cfg ...TypeSelectorConfig) error {
 	if err := k.p.alive(); err != nil {
 		return err

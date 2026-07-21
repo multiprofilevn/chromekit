@@ -12,8 +12,8 @@ import (
 
 // BoundingBox is an element's rendered geometry in CSS pixels (viewport-relative).
 type BoundingBox struct {
-	X, Y, Width, Height        float64
-	Left, Right, Top, Bottom   float64
+	X, Y, Width, Height      float64
+	Left, Right, Top, Bottom float64
 }
 
 // QuerySelector returns the first node matching selector. Polls until timeout.

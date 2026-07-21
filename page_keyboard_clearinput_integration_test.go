@@ -3,36 +3,14 @@
 package chromekit
 
 import (
-	"os"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/tuwibu/chromekit/input"
 )
 
-// resolveChromePath returns a usable chrome.exe path for the integration test.
-// Order: env CHROME_PATH > common Windows install dirs > skip.
-func resolveChromePath(t *testing.T) string {
-	t.Helper()
-	if p := os.Getenv("CHROME_PATH"); p != "" {
-		return p
-	}
-	if runtime.GOOS != "windows" {
-		t.Skip("integration test currently expects Windows chrome.exe — set CHROME_PATH to override")
-	}
-	candidates := []string{
-		`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-		`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return c
-		}
-	}
-	t.Skip("no chrome.exe found in standard locations; set CHROME_PATH to run this test")
-	return ""
-}
+// resolveChromePath lives in stress_helpers_test.go (build tag
+// `integration || stress`) so integration and stress tests share it.
 
 // dataURLInputPage embeds a single text input pre-filled with a known string.
 // Use a value with a leading 'a' so a buggy Ctrl+A path that types "a" first

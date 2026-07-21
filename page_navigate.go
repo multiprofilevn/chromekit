@@ -26,10 +26,14 @@ func (p *Page) Navigate(url string, timeout time.Duration) error {
 	if p.cfg != nil && p.cfg.inputBackend == BackendNative && p.browser != nil {
 		return p.navigateOmnibox(url, timeout)
 	}
-	if err := chromedp.Run(p.ctx, chromedp.Navigate(url)); err != nil {
+	// The timeout covers the whole operation, not just the wait: chromedp.Run
+	// on p.ctx alone blocks indefinitely when the renderer stops answering.
+	navCtx, cancel := opCtx(p.ctx, timeout)
+	defer cancel()
+	if err := chromedp.Run(navCtx, chromedp.Navigate(url)); err != nil {
 		return fmt.Errorf("%w: %s", ErrNavigate, err.Error())
 	}
-	return p.WaitForReady(timeout)
+	return p.waitReadyWithin(navCtx)
 }
 
 // navigateOmnibox simulates a user typing the URL into Chrome's address
@@ -91,10 +95,12 @@ func (p *Page) Reload(timeout time.Duration) error {
 		return err
 	}
 	p.log.Infof("reload")
-	if err := chromedp.Run(p.ctx, chromedp.Reload()); err != nil {
+	ctx, cancel := opCtx(p.ctx, timeout)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.Reload()); err != nil {
 		return fmt.Errorf("%w: %s", ErrNavigate, err.Error())
 	}
-	return p.WaitForReady(timeout)
+	return p.waitReadyWithin(ctx)
 }
 
 // GoBack navigates back in history.
@@ -103,10 +109,12 @@ func (p *Page) GoBack(timeout time.Duration) error {
 		return err
 	}
 	p.log.Infof("go back")
-	if err := chromedp.Run(p.ctx, chromedp.NavigateBack()); err != nil {
+	ctx, cancel := opCtx(p.ctx, timeout)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.NavigateBack()); err != nil {
 		return fmt.Errorf("%w: %s", ErrNavigate, err.Error())
 	}
-	return p.WaitForReady(timeout)
+	return p.waitReadyWithin(ctx)
 }
 
 // GoForward navigates forward in history.
@@ -115,8 +123,10 @@ func (p *Page) GoForward(timeout time.Duration) error {
 		return err
 	}
 	p.log.Infof("go forward")
-	if err := chromedp.Run(p.ctx, chromedp.NavigateForward()); err != nil {
+	ctx, cancel := opCtx(p.ctx, timeout)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.NavigateForward()); err != nil {
 		return fmt.Errorf("%w: %s", ErrNavigate, err.Error())
 	}
-	return p.WaitForReady(timeout)
+	return p.waitReadyWithin(ctx)
 }
