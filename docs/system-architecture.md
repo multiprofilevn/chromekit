@@ -426,6 +426,26 @@ func (p *Page) Navigate(url string, timeout time.Duration) error {
 
 **No global state**: all state is instance-bound (Browser or Page struct fields). Thread-safe via fine-grained mutexes.
 
+## Testing & Concurrency
+
+A stress test suite (build tag `stress`) validates fleet-scale behavior:
+
+- **stress_tab_churn_test.go** — concurrent tab create/navigate/close under gesture load; exercises SwitchPageByIndex + reader concurrency
+- **stress_concurrent_page_ops_test.go** — concurrent Screenshot/Evaluate/gesture ops on one page; detects indefinite hangs via 30s watchdog (env `STRESS_OP_WATCHDOG_SEC`)
+- **stress_connect_close_cycles_test.go** — 100 Connect→use→Close cycles (env `STRESS_CYCLES`, `STRESS_DEBUG_PORT`); validates no goroutine or heap growth
+
+**Validation at 100 headed Chrome procs**: race detector clean, goroutine settle ✓, heap flat ✓.
+
+### Known concurrency issues (awaiting fixes)
+
+| Issue | Manifestation | Scope |
+|-------|---|---|
+| **Ops without deadline hang indefinitely** | Page.Screenshot() / Evaluate() block forever when a concurrent Navigate replaces the document; only exit on context cancel | chromedp.Run(p.ctx) calls need default deadline |
+| **First-attach race on new Page** | Concurrent SwitchPageByIndex + NewPage listener init race chromedp's lazy attachTarget; 3 race reports in `-race` mode | serialize first-run / attach before publishing page to map |
+| **Connect-path teardown** | Goroutine settle delay under `-race` on Connect path; needs targeted measurement | investigate if teardown is slow or if leak remains |
+
+See plans/reports/ for stress validation details. Follow-up fixes prioritized: op deadlines (high), first-attach serialization, Connect-path teardown, gesture limiter tuning.
+
 ## Integration points
 
 | Layer | Interface | Example |

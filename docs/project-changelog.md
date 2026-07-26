@@ -12,6 +12,27 @@ Both methods are integration-tested (build tag `integration`).
 
 ## [Unreleased]
 
+### Added — stress suite expansion & 100-proc validation (2026-07-26)
+
+Three targeted stress scenarios (build tag `stress`) covering paths the fleet
+test does not: `TestStress_TabChurnUnderGestureLoad` (page churn + switch racing
+in-flight gestures, Launch and Connect paths), `TestStress_ConcurrentPageOps`
+(gesture/Evaluate/Screenshot/listener/frame-poll/Navigate on one page, with a
+per-op hang watchdog), `TestStress_ConnectCloseCycles` (goroutine growth over
+Connect/Close cycles against an externally owned Chrome).
+
+Validation at 100 headed Chrome processes (GPM binary, race + normal runs):
+- Fleet path race-clean at 100 procs; goroutines settle; heap flat over 10 min.
+- Connect/Close: 100 cycles, goroutine count perfectly flat — no leak.
+- Confirmed defects (fix tracked as follow-up): ops without their own deadline
+  (`Screenshot` et al.) hang indefinitely when a concurrent navigation replaces
+  the document; concurrent first-use of a freshly created page races chromedp's
+  lazy target attach (`SwitchPageByIndex`+`BringToFront` vs `NewPage` listener
+  init).
+- Known behaviour: the process-global gesture limiter (default 10) dominates
+  measured gesture latency once browser count far exceeds the limit — tuning is
+  a separate follow-up.
+
 ### Fixed — leak & concurrency audit (2026-07-20)
 
 Findings from a full leak/goroutine/handle audit, each verified against real

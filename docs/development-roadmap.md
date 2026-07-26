@@ -82,6 +82,32 @@
 - **macOS / Linux native input**: requires Quartz / X11 bindings, too platform-specific. CDP suffices.
 - **Headless + native combo**: native needs visible window; hard constraint.
 
+## Known concurrency issues (awaiting fixes)
+
+Validated via stress test suite (100 headed Chrome at fleet scale). Confirmed defects, not regressions:
+
+1. **Page ops hang indefinitely without deadline** (High priority)
+   - Scope: Screenshot, Evaluate, any chromedp.Run(p.ctx) call
+   - Trigger: concurrent Navigate replaces document while op is in-flight
+   - Evidence: 100% reproduction in stress_concurrent_page_ops_test.go; 30s watchdog required
+   - Fix direction: add default deadline to all Page method calls
+
+2. **Race in first-attach of new Page** (Medium priority)
+   - Scope: concurrent SwitchPageByIndex + NewPage listener init
+   - Trigger: rapid tab churn under gesture load
+   - Evidence: 3 chromedp race reports in `-race` mode; caught by stress_tab_churn_test.go
+   - Fix direction: serialize lazy attachTarget via per-page once, or ensure first Run completes before page publication
+
+3. **Connect-path teardown measurement** (Low priority)
+   - Scope: goroutine settle delay on Connect path under `-race`
+   - Status: Connect/Close confirmed leak-free over 100 cycles (closes old suspicion; stale comments may remain)
+   - Fix direction: targeted measurement needed in follow-up plan; may be `-race` instrumentation artifact
+
+4. **Gesture limiter tuning** (Follow-up optimization)
+   - Current: 10-slot semaphore per-process blocks 100 browsers; latency gate fails by design
+   - Evidence: 30 proc baseline = 1.1s p95; 100 proc = 16.4s p95 (semaphore oversubscription, not code slowness)
+   - Fix direction: decide limiter strategy (per-browser vs per-process), re-gate latency at matched scale
+
 ## Known gaps
 
 ### Keyboard modifier sequences

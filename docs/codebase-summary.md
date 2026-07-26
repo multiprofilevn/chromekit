@@ -99,8 +99,14 @@ chromekit/
     │   Bezier path generation (start, end, waypoints)
     ├── input/cursor_seeder_test.go
     │   OS position seeding (Windows GetCursorPos)
-    └── input/modifier_test.go
-        Keyboard modifier key sequences
+    ├── input/modifier_test.go
+    │   Keyboard modifier key sequences
+    ├── stress_tab_churn_test.go (build tag: stress)
+    │   TestStress_TabChurnUnderGestureLoad — per-browser gesture loop + tab open/navigate/close churn under Pages/Current/SwitchPageByIndex reader; validates race/leak at scale
+    ├── stress_concurrent_page_ops_test.go (build tag: stress)
+    │   TestStress_ConcurrentPageOps — concurrent gesture/Evaluate/Screenshot/listener ops on single page; each op bounded by 30s watchdog (env STRESS_OP_WATCHDOG_SEC) to detect hangs
+    └── stress_connect_close_cycles_test.go (build tag: stress)
+        TestStress_ConnectCloseCycles — Connect→use→Close cycles against external Chrome (env STRESS_CYCLES default 100, STRESS_DEBUG_PORT default 9791); validates no goroutine/heap leak
 ```
 
 ## Entry points
@@ -193,6 +199,7 @@ chromekit/
 
 - **Unit tests**: URL parsing (page_navigate_strip_scheme_test.go), Bezier path generation (input/cursor_path_test.go), key codes (input/modifier_test.go)
 - **Fixture tests**: browser_connect_test.go sets up a headless Chrome instance for integration validation
+- **Stress suite** (build tag `stress`): fleet-scale concurrency validation — tab churn under gesture load, concurrent page operations with timeouts, Connect/Close cycles for leak detection; runs at 100 headed Chrome processes with race detector + goroutine/heap profiling
 - **Coverage**: light — math + parsing. No full end-to-end test harness.
 - **No CI config** detected (no .github/workflows/, no Makefile test target)
 
