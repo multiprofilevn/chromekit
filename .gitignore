@@ -19,3 +19,4 @@ AGENTS.md
 *.lock
 .claude/
 plans/
+session-state/
