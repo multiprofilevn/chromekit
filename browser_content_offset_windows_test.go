@@ -53,10 +53,13 @@ func TestContentOffset_IsAbsolute(t *testing.T) {
 		ScreenX: 1000, ScreenY: 400,
 		OuterWidth: 800, OuterHeight: 600,
 		InnerWidth: 784, InnerHeight: 520,
+		DevicePixelRatio: 1,
 	}
 	rect := input.Rect{Left: 1000, Top: 400, Right: 1800, Bottom: 1000}
-	// chromeX = (800-784)/2 = 8, chromeY = 600-520 = 80.
-	const wantX, wantY = 1008, 480
+	// border = (800-784)/2 = 8; chromeY = (600-520) - 8 = 72, because the 8px
+	// bottom border is part of outerHeight-innerHeight but sits UNDER the
+	// content, not above it.
+	const wantX, wantY = 1008, 472
 
 	b1 := newOffsetTestBrowser(t, 0, 0, metrics, rect)
 	got1X, got1Y, err := b1.ContentOffset()
@@ -94,6 +97,7 @@ func TestContentOffset_RejectsSpoofedWindowMetrics(t *testing.T) {
 		ScreenX: 1700, ScreenY: 1200, // window really sits at (0,0)
 		OuterWidth: 800, OuterHeight: 600,
 		InnerWidth: 784, InnerHeight: 520,
+		DevicePixelRatio: 1,
 	}
 	realRect := input.Rect{Left: 0, Top: 0, Right: 800, Bottom: 600}
 
@@ -115,8 +119,9 @@ func TestContentOffset_AcceptsWithinTolerance(t *testing.T) {
 		ScreenX: 0, ScreenY: 0,
 		OuterWidth: 800, OuterHeight: 600,
 		InnerWidth: 784, InnerHeight: 520,
+		DevicePixelRatio: 1,
 	}
-	// Content origin lands at (8, 80); the rect starts 2px to the right of it.
+	// Content origin lands at (8, 72); the rect starts 2px to the right of it.
 	rect := input.Rect{Left: 10, Top: 0, Right: 810, Bottom: 600}
 
 	b := newOffsetTestBrowser(t, 0, 0, metrics, rect)
@@ -125,7 +130,7 @@ func TestContentOffset_AcceptsWithinTolerance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ContentOffset rejected a 2px overhang as spoofing: %v", err)
 	}
-	if gotX != 8 || gotY != 80 {
-		t.Fatalf("ContentOffset = (%d,%d), want (8,80)", gotX, gotY)
+	if gotX != 8 || gotY != 72 {
+		t.Fatalf("ContentOffset = (%d,%d), want (8,72)", gotX, gotY)
 	}
 }

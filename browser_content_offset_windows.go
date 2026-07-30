@@ -4,32 +4,36 @@ package chromekit
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/tuwibu/chromekit/input"
 )
 
 // windowMetrics is the geometry Chrome reports about its own window, read from
-// inside the page realm.
+// inside the page realm. Every length here is in CSS pixels; DevicePixelRatio
+// is the factor that turns them into physical screen pixels.
 //
 // UNTRUSTED. Every field here is a property of the page's `window` object and
 // page script can redefine all of them. Treat the numbers as a hint that must
 // be bounded by an out-of-band measurement before anything moves the physical
 // cursor with them.
 type windowMetrics struct {
-	ScreenX     int `json:"screenX"`
-	ScreenY     int `json:"screenY"`
-	OuterWidth  int `json:"outerWidth"`
-	OuterHeight int `json:"outerHeight"`
-	InnerWidth  int `json:"innerWidth"`
-	InnerHeight int `json:"innerHeight"`
+	ScreenX          int     `json:"screenX"`
+	ScreenY          int     `json:"screenY"`
+	OuterWidth       int     `json:"outerWidth"`
+	OuterHeight      int     `json:"outerHeight"`
+	InnerWidth       int     `json:"innerWidth"`
+	InnerHeight      int     `json:"innerHeight"`
+	DevicePixelRatio float64 `json:"devicePixelRatio"`
 }
 
-// Seams over the two independent sources ContentOffset draws on. Tests replace
-// them so the spoofing case can be exercised without a real browser and the
-// trusted bound can be moved independently of the untrusted measurement.
+// Seams over the three independent sources the coordinate frame draws on. Tests
+// replace them so the spoofing case can be exercised without a real browser and
+// the trusted bounds can be moved independently of the untrusted measurement.
 var (
 	pageWindowMetrics = readPageWindowMetrics
 	browserWindowRect = readBrowserWindowRect
+	osDPIScale        = readOSDPIScale
 )
 
 // readPageWindowMetrics asks the renderer for its window geometry.
@@ -43,10 +47,22 @@ func readPageWindowMetrics(b *Browser) (windowMetrics, error) {
 		screenX: window.screenX, screenY: window.screenY,
 		outerWidth: window.outerWidth, outerHeight: window.outerHeight,
 		innerWidth: window.innerWidth, innerHeight: window.innerHeight,
+		devicePixelRatio: window.devicePixelRatio,
 	})`, &info); err != nil {
 		return windowMetrics{}, fmt.Errorf("contentOffset: query window metrics: %w", err)
 	}
 	return info, nil
+}
+
+// readOSDPIScale returns the window manager's DPI ratio for this window, or 1.0
+// when there is no HWND to ask. Trusted, but blind to a forced device scale
+// factor — see resolveWindowScale.
+func readOSDPIScale(b *Browser) float64 {
+	hwnd, err := b.HWND()
+	if err != nil {
+		return 1.0
+	}
+	return input.MeasureDPIScale(hwnd)
 }
 
 // readBrowserWindowRect reads the window rectangle from the window manager.
@@ -66,10 +82,33 @@ func readBrowserWindowRect(b *Browser) (input.Rect, error) {
 //
 // Win32 GetClientRect / ClientToScreen do NOT work here because Chrome on
 // Windows draws its own title bar / tabs INSIDE the Win32 client area (custom
-// window chrome). The measurement therefore has to come from the renderer:
+// window chrome). The measurement therefore has to come from the renderer, in
+// CSS pixels, and be scaled into physical ones:
 //
-//	contentTop  = window.screenY + (outerHeight - innerHeight)
-//	contentLeft = window.screenX + (outerWidth  - innerWidth ) / 2
+//	border      = (outerWidth  - innerWidth) / 2
+//	contentLeft = (window.screenX + border                             ) * scale
+//	contentTop  = (window.screenY + (outerHeight - innerHeight) - border) * scale
+//
+// outerHeight - innerHeight is NOT the height of the chrome above the content:
+// it also contains the resize border BELOW it, which sits under the content and
+// must not be added to the origin. Windows gives Chrome an equal border left,
+// right and bottom, so the horizontal term measures the vertical one. Both
+// measured configurations agree: unscaled, (1920-1904)/2 = 8 and 1080-929 = 151,
+// so the chrome above the content is 143; at forced scale 1/3, (1920-1896)/2 =
+// 12 and 1080-981 = 99, so it is 87 CSS px = 29 physical.
+//
+// The correction is worth 8px unscaled — small enough that clicks still landed
+// inside a link and it went unnoticed — and 12 CSS px at 1/3, which is more than
+// half the height of a 21px result link. Measured with a click recorder in the
+// page: aiming at a link's centre y=256.3 delivered the click at y=267, one
+// pixel past the bottom edge of its box, onto the enclosing <h2>.
+//
+// The scale term is not decoration. Under --force-device-scale-factor Chrome
+// reports these lengths in a CSS pixel that is no longer a screen pixel:
+// measured at 0.3333 with a 1920x1080 logical window, screenX came back 2358
+// while GetWindowRect put the window's left edge at 786 — the same edge, in the
+// two different units. Multiplying by the resolved scale is what reconciles
+// them (2358 x 0.3333 = 786).
 //
 // Those are properties of the page's own window object, which page script can
 // redefine. Because the native backend drives the PHYSICAL cursor, an inflated
@@ -92,13 +131,22 @@ func (b *Browser) ContentOffset() (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	rect, rerr := browserWindowRect(b)
+	if rerr != nil {
+		b.log.Errorf("chromekit: content origin cannot be bounded — no window rectangle: %v", rerr)
+		return 0, 0, fmt.Errorf("contentOffset: no out-of-band window rectangle to bound the page-measured origin: %w", rerr)
+	}
 
-	chromeY := info.OuterHeight - info.InnerHeight
-	chromeX := (info.OuterWidth - info.InnerWidth) / 2 // borders split L/R
-	ox := info.ScreenX + chromeX
-	oy := info.ScreenY + chromeY
+	scale := resolveWindowScale(info, rect, osDPIScale(b), b.warnf)
+	chromeX := float64(info.OuterWidth-info.InnerWidth) / 2         // borders split L/R
+	chromeY := float64(info.OuterHeight-info.InnerHeight) - chromeX // bottom border is NOT above the content
+	if chromeY < 0 {
+		chromeY = 0
+	}
+	ox := int(math.Round((float64(info.ScreenX) + chromeX) * scale))
+	oy := int(math.Round((float64(info.ScreenY) + chromeY) * scale))
 
-	if err := b.boundContentOrigin(ox, oy); err != nil {
+	if err := b.boundContentOrigin(ox, oy, rect); err != nil {
 		return 0, 0, err
 	}
 
@@ -112,16 +160,14 @@ func (b *Browser) ContentOffset() (int, int, error) {
 // boundContentOrigin rejects a page-measured content origin that cannot be
 // reconciled with the window manager's rectangle.
 //
-// Fails closed on purpose, including when the rectangle itself is unavailable:
-// without the out-of-band bound there is nothing left but the page's own word
-// for where the physical cursor should go. Callers that genuinely cannot resolve
-// an HWND declare the frame up front with WithNativeWindow instead.
-func (b *Browser) boundContentOrigin(ox, oy int) error {
-	rect, err := browserWindowRect(b)
-	if err != nil {
-		b.log.Errorf("chromekit: content origin (%d,%d) cannot be bounded — no window rectangle: %v", ox, oy, err)
-		return fmt.Errorf("contentOffset: no out-of-band window rectangle to bound the page-measured origin: %w", err)
-	}
+// The rectangle is read by the caller and passed in, so the origin is bounded
+// by the SAME rectangle that resolved the scale — re-reading it here would let
+// a window move between the two and turn a legitimate origin into a refusal.
+// The caller fails closed when no rectangle is available at all: without the
+// out-of-band bound there is nothing left but the page's own word for where the
+// physical cursor should go. Callers that genuinely cannot resolve an HWND
+// declare the frame up front with WithNativeWindow instead.
+func (b *Browser) boundContentOrigin(ox, oy int, rect input.Rect) error {
 	tol := DefaultContentOffsetTolerance
 	if b.cfg != nil && b.cfg.contentOffsetTolerance > 0 {
 		tol = b.cfg.contentOffsetTolerance
@@ -134,17 +180,6 @@ func (b *Browser) boundContentOrigin(ox, oy int) error {
 	return fmt.Errorf("contentOffset: content origin (%d,%d) outside window rect %+v (tolerance %dpx)", ox, oy, rect, tol)
 }
 
-// WindowScale returns the per-monitor DPI scale factor of the Chrome window
-// (1.0 at 96 DPI). Measured from the live HWND rather than taken from the
-// caller, so it stays correct after the window moves to a monitor with a
-// different scaling factor.
-func (b *Browser) WindowScale() (float64, error) {
-	hwnd, err := b.HWND()
-	if err != nil {
-		return 0, err
-	}
-	return input.MeasureDPIScale(hwnd), nil
-}
 
 // WindowRect returns the window's outer rectangle in absolute screen pixels,
 // straight from the window manager. Callers use it as the out-of-band bound on
