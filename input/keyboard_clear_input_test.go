@@ -84,3 +84,6 @@ func TestKeyboard_ClearInput_PropagatesSecondError(t *testing.T) {
 		t.Errorf("expected 2 calls before error surfaced, got %d", len(rb.combos))
 	}
 }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*recordingBackend) SetWindow(Window) {}

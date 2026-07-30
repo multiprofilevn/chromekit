@@ -47,68 +47,6 @@ const (
 	afInet              uint32 = 2
 )
 
-// ContentOffset returns the chrome-chrome offset in screen pixels: how far
-// the page content area's top-left sits from the window's top-left. On
-// Windows that's title bar + tab strip + omnibox + bookmarks bar (~80-110px
-// vertically, a few px horizontally for resize borders).
-//
-// Win32 GetClientRect / ClientToScreen do NOT work here because Chrome on
-// Windows draws its own title bar / tabs INSIDE the Win32 client area
-// (custom window chrome). Instead we query the renderer via JS:
-//
-//	contentTop  = window.screenY + (outerHeight - innerHeight)
-//	contentLeft = window.screenX + (outerWidth  - innerWidth ) / 2
-//
-// then subtract the window's user-declared X/Y to get a relative offset.
-// Cached after first call.
-func (b *Browser) ContentOffset() (int, int, error) {
-	b.contentMu.Lock()
-	if b.contentCached {
-		ox, oy := b.contentOffsetX, b.contentOffsetY
-		b.contentMu.Unlock()
-		return ox, oy, nil
-	}
-	b.contentMu.Unlock()
-
-	page := b.Current()
-	if page == nil {
-		return 0, 0, fmt.Errorf("contentOffset: no current page")
-	}
-
-	var info struct {
-		ScreenX     int `json:"screenX"`
-		ScreenY     int `json:"screenY"`
-		OuterWidth  int `json:"outerWidth"`
-		OuterHeight int `json:"outerHeight"`
-		InnerWidth  int `json:"innerWidth"`
-		InnerHeight int `json:"innerHeight"`
-	}
-	if err := page.Evaluate(`({
-		screenX: window.screenX, screenY: window.screenY,
-		outerWidth: window.outerWidth, outerHeight: window.outerHeight,
-		innerWidth: window.innerWidth, innerHeight: window.innerHeight,
-	})`, &info); err != nil {
-		return 0, 0, fmt.Errorf("contentOffset: query window metrics: %w", err)
-	}
-
-	chromeY := info.OuterHeight - info.InnerHeight
-	chromeX := (info.OuterWidth - info.InnerWidth) / 2 // borders split L/R
-	contentScreenX := info.ScreenX + chromeX
-	contentScreenY := info.ScreenY + chromeY
-
-	// Offset relative to the window position the user declared. If the user
-	// declared (0, 0) and Chrome reports screenX/Y of (0, 0), the offset
-	// equals the chrome-chrome thickness directly.
-	ox := contentScreenX - b.cfg.nativeWindow.X
-	oy := contentScreenY - b.cfg.nativeWindow.Y
-
-	b.contentMu.Lock()
-	b.contentOffsetX, b.contentOffsetY = ox, oy
-	b.contentCached = true
-	b.contentMu.Unlock()
-	return ox, oy, nil
-}
-
 // SetHWND lets an external orchestrator (e.g. chromefleet) inject a window
 // handle it discovered via PID, bypassing the title-substring heuristic.
 func (b *Browser) SetHWND(hwnd uintptr) {

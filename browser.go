@@ -208,7 +208,18 @@ func withProcessGroupDefaults(fn func(*exec.Cmd)) func(*exec.Cmd) {
 //
 // Measured over 30 Connect/Close cycles: goroutines and heap stay flat, the
 // user's tabs and Chrome process survive.
-func (b *Browser) Close() {
+//
+// Returns error for firefoxkit signature parity. chromekit's teardown is
+// pure context cancellation — chromedp reports no failure path for it — so
+// every return here is nil, on the first call and every one after (there is
+// no closeOnce gate around the body: it already tolerates repeat calls,
+// since a second pass just cancels already-cancelled contexts and walks a
+// nil'd page slice). Matches firefoxkit's own contract on a second call
+// (its closeOnce-gated body never reruns, so its local firstErr stays nil
+// regardless of what the first call did) — see phase-06 test pin. If a
+// future change adds an operation here that can genuinely fail, thread its
+// error into the return instead of swallowing it.
+func (b *Browser) Close() error {
 	b.signalClosed()
 
 	b.pagesMu.Lock()
@@ -239,7 +250,7 @@ func (b *Browser) Close() {
 		if b.allocCancel != nil {
 			b.allocCancel()
 		}
-		return
+		return nil
 	}
 
 	for i := len(pages) - 1; i >= 0; i-- {
@@ -253,6 +264,7 @@ func (b *Browser) Close() {
 	if b.allocCancel != nil {
 		b.allocCancel()
 	}
+	return nil
 }
 
 // detachWithoutClosing makes a chromedp context safe to cancel without taking

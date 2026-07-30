@@ -176,3 +176,6 @@ func TestGestureLimiter_SwapMidFlightNoDeadlock(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*countingBackend) SetWindow(Window) {}

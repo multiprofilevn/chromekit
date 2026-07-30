@@ -1,6 +1,16 @@
 package chromekit
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/tuwibu/chromekit/input"
+)
+
+// ErrForegroundLost is raised when the browser window lost the OS foreground
+// mid-input, so the remaining keystrokes would have landed somewhere else.
+// Aliased from the input package: the sentinel has to live there (that is where
+// it is returned from), and chromekit → chromekit/input is a one-way import.
+var ErrForegroundLost = input.ErrForegroundLost
 
 var (
 	ErrContextCanceled        = errors.New("chromekit: context canceled")

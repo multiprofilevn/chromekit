@@ -178,6 +178,18 @@ func (m *MouseAPI) RightClick(selector string) error {
 	return m.p.cursor.Click(ctx, x, y, input.MouseRight)
 }
 
+// MiddleClick clicks at (x, y) with the middle button — firefoxkit parity
+// (chromekit's MouseAPI previously had no middle-button primitive).
+func (m *MouseAPI) MiddleClick(x, y float64) error {
+	if err := m.p.alive(); err != nil {
+		return err
+	}
+	m.p.initInput()
+	ctx, cancel := opCtx(m.p.ctx, 0)
+	defer cancel()
+	return m.p.cursor.Click(ctx, x, y, input.MouseMiddle)
+}
+
 // DragAndDrop holds the left button down at fromSel's center, glides through
 // ~10 intermediate points, and releases at toSel's center. The intermediate
 // moves are needed because HTML5 drag fires only after the pointer crosses a

@@ -103,3 +103,6 @@ func TestMouseAPI_HonorsCancellation(t *testing.T) {
 		t.Fatal("MoveTo hung past the parent deadline — not bounded")
 	}
 }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*ctxCapturingBackend) SetWindow(input.Window) {}

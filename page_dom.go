@@ -136,6 +136,24 @@ func (p *Page) ScrollIntoView(selector string) error {
 	return nil
 }
 
+// Focus runs el.focus() on the first matching element. Silently succeeds
+// (returns nil) when the selector matches nothing — mirrors firefoxkit's
+// Focus exactly: it routes through EvalSelector with out=nil, so a
+// null/no-match result never surfaces as an error there either. Callers
+// that need the match itself confirmed should combine this with
+// QuerySelector or WaitForSelector.
+func (p *Page) Focus(selector string) error {
+	if err := p.alive(); err != nil {
+		return err
+	}
+	js := fmt.Sprintf(`(() => { const el = document.querySelector(%q); if (el) el.focus(); return true; })()`, selector)
+	var ok bool
+	if err := chromedp.Run(p.ctx, chromedp.Evaluate(js, &ok)); err != nil {
+		return fmt.Errorf("%w: focus %q: %s", ErrEvaluate, selector, err.Error())
+	}
+	return nil
+}
+
 // GetAttribute returns the value of attribute on the first element matching selector.
 func (p *Page) GetAttribute(selector, attribute string) (string, error) {
 	if err := p.alive(); err != nil {

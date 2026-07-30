@@ -82,3 +82,9 @@ func (b *noSeederBackend) MouseScroll(_ context.Context, _, _ float64) error    
 func (b *noSeederBackend) KeyChar(_ context.Context, _ rune) error                      { return nil }
 func (b *noSeederBackend) InsertText(_ context.Context, _ string) error                 { return nil }
 func (b *noSeederBackend) KeyCombo(_ context.Context, _ uint16, _ Modifier) error       { return nil }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*fakeBackend) SetWindow(Window) {}
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*noSeederBackend) SetWindow(Window) {}

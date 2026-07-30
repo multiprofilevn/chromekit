@@ -352,3 +352,9 @@ func checkCorrection(t *testing.T, events []event, intended rune) {
 		t.Errorf("typo %q is not a QWERTY neighbor of %q (allowed: %s)", events[0].ch, intended, neighbors)
 	}
 }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*eventBackend) SetWindow(Window) {}
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*bufferBackend) SetWindow(Window) {}

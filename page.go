@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chromedp/cdproto/page"
@@ -35,11 +36,22 @@ type Page struct {
 	mu    sync.RWMutex
 	index int
 
+	// url/title back URL()/Title() — populated only by URLLive/TitleLive
+	// (see page_title_url.go). chromekit has no per-navigation event wiring
+	// to refresh them eagerly, so they stay whatever the last *Live call set
+	// them to. Empty until first queried live.
+	url   string
+	title string
+
 	inputOnce sync.Once
-	backend   input.Backend
-	cursor    *input.Cursor
-	keyboard  *input.Keyboard
-	touch     *input.TouchScreen
+	// inputReady flips true once initInput has built (or accepted) the backend.
+	// setInputWindow reads it so a re-measure can reach a live backend without
+	// forcing one into existence for a page that never took native input.
+	inputReady atomic.Bool
+	backend    input.Backend
+	cursor     *input.Cursor
+	keyboard   *input.Keyboard
+	touch      *input.TouchScreen
 
 	listenersOnce  sync.Once
 	listenerMu     sync.RWMutex

@@ -15,7 +15,7 @@ import (
 // before any CDP call is made.
 //
 // Pass multiple paths to populate a multi-file input.
-func (p *Page) SetInputFiles(selector string, paths ...string) error {
+func (p *Page) SetInputFiles(sel string, paths ...string) error {
 	if err := p.alive(); err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func (p *Page) SetInputFiles(selector string, paths ...string) error {
 		}
 		abs[i] = a
 	}
-	node, err := p.QuerySelector(selector, 0)
+	node, err := p.QuerySelector(sel, 0)
 	if err != nil {
 		return err
 	}

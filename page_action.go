@@ -3,6 +3,7 @@ package chromekit
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
@@ -38,14 +39,48 @@ func (p *Page) Type(selector, text string) error {
 
 // Evaluate runs a JS expression and decodes the result into out (must be pointer).
 // Pass nil for out to discard.
-func (p *Page) Evaluate(expr string, out any) error {
+func (p *Page) Evaluate(expression string, out any) error {
 	if err := p.alive(); err != nil {
 		return err
 	}
-	if err := chromedp.Run(p.ctx, chromedp.Evaluate(expr, out)); err != nil {
+	if err := chromedp.Run(p.ctx, chromedp.Evaluate(expression, out)); err != nil {
 		return fmt.Errorf("%w: %s", ErrEvaluate, err.Error())
 	}
 	return nil
+}
+
+// ClickAt is a Page-level shortcut for Mouse().ClickAt — firefoxkit parity.
+func (p *Page) ClickAt(x, y float64) error {
+	return p.Mouse().ClickAt(x, y)
+}
+
+// HoverAt is sugar for Mouse().MoveTo — firefoxkit parity.
+func (p *Page) HoverAt(x, y float64) error {
+	return p.Mouse().MoveTo(x, y)
+}
+
+// Hover moves the cursor to the center of the element matching selector.
+// Page-level shortcut for Mouse().Hover — firefoxkit parity.
+func (p *Page) Hover(selector string) error {
+	return p.Mouse().Hover(selector)
+}
+
+// Wait blocks for d, honoring context cancellation — convenience for pacing
+// action sequences. Mirrors firefoxkit's Page.Wait exactly: d<=0 is a no-op;
+// otherwise it returns as soon as either the timer fires or the page
+// context is cancelled, whichever happens first.
+func (p *Page) Wait(d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-p.ctx.Done():
+		return p.ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 // Screenshot captures the visible viewport as PNG.
@@ -88,17 +123,17 @@ func (p *Page) ScreenshotClip(x, y, w, h float64) ([]byte, error) {
 
 // ScreenshotElement captures the bounding box of the element matching sel.
 // Scrolls the element into view first when off-screen.
-func (p *Page) ScreenshotElement(selector string) ([]byte, error) {
+func (p *Page) ScreenshotElement(sel string) ([]byte, error) {
 	if err := p.alive(); err != nil {
 		return nil, err
 	}
-	if err := p.WaitForSelector(selector, 0); err != nil {
+	if err := p.WaitForSelector(sel, 0); err != nil {
 		return nil, err
 	}
-	if err := p.ScrollIntoView(selector); err != nil {
+	if err := p.ScrollIntoView(sel); err != nil {
 		return nil, err
 	}
-	node, err := p.QuerySelector(selector, 0)
+	node, err := p.QuerySelector(sel, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +142,7 @@ func (p *Page) ScreenshotElement(selector string) ([]byte, error) {
 		return nil, err
 	}
 	if box.Width <= 0 || box.Height <= 0 {
-		return nil, fmt.Errorf("%w: zero-size element %q", ErrEvaluate, selector)
+		return nil, fmt.Errorf("%w: zero-size element %q", ErrEvaluate, sel)
 	}
 	return p.ScreenshotClip(box.Left, box.Top, box.Width, box.Height)
 }

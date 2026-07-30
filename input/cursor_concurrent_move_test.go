@@ -93,3 +93,6 @@ func TestCursor_ConcurrentClickAndScroll(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// SetWindow is unused by this fake — the frame lives in the real native backend.
+func (*moveRecorder) SetWindow(Window) {}

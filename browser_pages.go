@@ -245,8 +245,8 @@ func canClosePage(primary, attached bool, npages int) error {
 }
 
 // SwitchPageByIndex makes the page at index the current page.
-func (b *Browser) SwitchPageByIndex(index int) error {
-	p, err := b.setCurrentByIndex(index)
+func (b *Browser) SwitchPageByIndex(i int) error {
+	p, err := b.setCurrentByIndex(i)
 	if err != nil {
 		return err
 	}

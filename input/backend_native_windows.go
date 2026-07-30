@@ -4,9 +4,12 @@ package input
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -79,7 +82,18 @@ var (
 )
 
 type nativeBackend struct {
-	win Window
+	// winMu guards win. The frame is re-measured whenever the window may have
+	// moved, which can land while another goroutine is mid-gesture — hence a
+	// lock rather than "set it once at construction".
+	winMu sync.RWMutex
+	win   Window
+	// guard mirrors Config.ForegroundGuard. nil means "no checking".
+	guard func() error
+	// guardChars counts characters emitted since construction so the guard can
+	// run once per GuardChunkSize keystrokes instead of on every one. Atomic:
+	// one backend per Page, but nothing stops two goroutines driving two pages
+	// of the same Browser at once.
+	guardChars atomic.Int64
 }
 
 func newNative(cfg Config) Backend {
@@ -87,11 +101,31 @@ func newNative(cfg Config) Backend {
 	if w.Scale <= 0 {
 		w.Scale = 1.0
 	}
-	return &nativeBackend{win: w}
+	return &nativeBackend{win: w, guard: cfg.ForegroundGuard}
+}
+
+// SetWindow swaps the coordinate frame in place. The backend object, and every
+// Cursor / Keyboard / TouchScreen already holding it, keeps working — only the
+// numbers change. See the Backend interface for why in-place matters.
+func (n *nativeBackend) SetWindow(w Window) {
+	if w.Scale <= 0 {
+		w.Scale = 1.0
+	}
+	n.winMu.Lock()
+	n.win = w
+	n.winMu.Unlock()
+}
+
+// window returns a snapshot of the current frame. Every coordinate transform
+// reads through here so a concurrent SetWindow can never be observed half-written.
+func (n *nativeBackend) window() Window {
+	n.winMu.RLock()
+	defer n.winMu.RUnlock()
+	return n.win
 }
 
 func (n *nativeBackend) toScreen(x, y float64) (int32, int32) {
-	sx, sy := cssToScreen(x, y, n.win)
+	sx, sy := cssToScreen(x, y, n.window())
 	return int32(math.Floor(sx)), int32(math.Floor(sy))
 }
 
@@ -145,7 +179,7 @@ func (n *nativeBackend) OSPositionCSS() (float64, float64, bool) {
 	if ok == 0 {
 		return 0, 0, false
 	}
-	cssX, cssY := screenToCSS(float64(p.X), float64(p.Y), n.win)
+	cssX, cssY := screenToCSS(float64(p.X), float64(p.Y), n.window())
 	return cssX, cssY, true
 }
 
@@ -156,7 +190,7 @@ func (n *nativeBackend) MouseMove(ctx context.Context, x, y float64) error {
 	sx, sy := n.toScreen(x, y)
 	nativeInputMu.Lock()
 	defer nativeInputMu.Unlock()
-	procSetCursorPos.Call(uintptr(sx), uintptr(sy))
+	setCursorPosFn(sx, sy)
 	return nil
 }
 
@@ -165,7 +199,7 @@ func (n *nativeBackend) MouseDown(ctx context.Context, x, y float64, b MouseButt
 		return err
 	}
 	flag := mouseDownFlag(b)
-	return sendMouse(flag, 0)
+	return n.sendMouse(flag, 0)
 }
 
 func (n *nativeBackend) MouseUp(ctx context.Context, x, y float64, b MouseButton) error {
@@ -173,7 +207,8 @@ func (n *nativeBackend) MouseUp(ctx context.Context, x, y float64, b MouseButton
 		return err
 	}
 	flag := mouseUpFlag(b)
-	return sendMouse(flag, 0)
+	// Release: raw emitter, never guarded — see the guarded-emitter block.
+	return sendMouseFn(flag, 0)
 }
 
 func (n *nativeBackend) MouseScroll(ctx context.Context, deltaX, deltaY float64) error {
@@ -182,13 +217,13 @@ func (n *nativeBackend) MouseScroll(ctx context.Context, deltaX, deltaY float64)
 	}
 	if deltaY != 0 {
 		amount := uint32(int32(-deltaY * float64(wheelDelta)))
-		if err := sendMouse(mouseEventfWheel, amount); err != nil {
+		if err := n.sendMouse(mouseEventfWheel, amount); err != nil {
 			return err
 		}
 	}
 	if deltaX != 0 {
 		amount := uint32(int32(deltaX * float64(wheelDelta)))
-		return sendMouse(mouseEventfHWheel, amount)
+		return n.sendMouse(mouseEventfHWheel, amount)
 	}
 	return nil
 }
@@ -197,11 +232,12 @@ func (n *nativeBackend) KeyChar(ctx context.Context, ch rune) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := sendKey(uint16(ch), keyEventfUnicode); err != nil {
+	if err := n.sendKey(uint16(ch), keyEventfUnicode); err != nil {
 		return err
 	}
 	time.Sleep(time.Duration(40+rand.Intn(40)) * time.Millisecond)
-	return sendKey(uint16(ch), keyEventfUnicode|keyEventfKeyUp)
+	// Release: raw emitter, never guarded — see the guarded-emitter block.
+	return sendKeyFn(uint16(ch), keyEventfUnicode|keyEventfKeyUp)
 }
 
 func (n *nativeBackend) InsertText(ctx context.Context, text string) error {
@@ -259,13 +295,13 @@ func (n *nativeBackend) KeyCombo(ctx context.Context, vk uint16, mods Modifier) 
 	}()
 
 	for _, k := range held {
-		if err := sendVKFn(k, 0); err != nil {
+		if err := n.sendVK(k, 0); err != nil {
 			return err
 		}
 		down = append(down, k)
 		time.Sleep(time.Duration(20+rand.Intn(20)) * time.Millisecond)
 	}
-	if err := sendVKFn(vk, 0); err != nil {
+	if err := n.sendVK(vk, 0); err != nil {
 		return err
 	}
 	down = append(down, vk)
@@ -283,9 +319,80 @@ func SerializeNativeInput(fn func()) {
 	fn()
 }
 
-// sendVKFn is the indirection tests replace to drive KeyCombo's failure paths
-// without a real SendInput. Production always points at sendVK.
-var sendVKFn = sendVK
+// sendVKFn / sendKeyFn / sendMouseFn are the indirections tests replace to
+// drive the emitter paths without a real SendInput. Production always points at
+// the real syscall wrappers.
+var (
+	sendVKFn    = sendVK
+	sendKeyFn   = sendKey
+	sendMouseFn = sendMouse
+	// setCursorPosFn is the seam over SetCursorPos. Tests replace it so the
+	// mouse paths can be driven without dragging the machine's physical pointer
+	// across the screen — which would also make any concurrent spec depend on
+	// where a human left the mouse.
+	setCursorPosFn = setCursorPos
+)
+
+// setCursorPos moves the OS pointer to an absolute screen pixel.
+func setCursorPos(sx, sy int32) {
+	procSetCursorPos.Call(uintptr(sx), uintptr(sy))
+}
+
+// The guarded emitters. Every keystroke and every mouse button event in this
+// backend goes through one of these three, which is what makes the foreground
+// check structural: ClearInput (Ctrl+A + Delete) and the omnibox combo (Ctrl+L)
+// are covered without either one knowing the guard exists.
+//
+// Key/button RELEASES deliberately bypass the guard and call the raw emitter.
+// A guard that refuses a release leaves Ctrl or a mouse button stuck down for
+// the whole OS — worse than the stray input it was trying to prevent.
+
+// guardKeystroke consults the guard once every GuardChunkSize emitted
+// keystrokes. Chunking is what keeps the check off the per-keystroke path; the
+// price is that up to GuardChunkSize-1 keystrokes can still reach a foreign
+// window before the loss is noticed, so the error carries that upper bound for
+// callers driving credentials.
+func (n *nativeBackend) guardKeystroke() error {
+	if n.guard == nil {
+		return nil
+	}
+	emitted := n.guardChars.Add(1) - 1
+	if emitted%GuardChunkSize != 0 {
+		return nil
+	}
+	err := n.guard()
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, ErrForegroundLost) {
+		return fmt.Errorf("%w: %d chars emitted", ErrForegroundLost, emitted)
+	}
+	return err
+}
+
+func (n *nativeBackend) sendKey(scan uint16, flags uint32) error {
+	if err := n.guardKeystroke(); err != nil {
+		return err
+	}
+	return sendKeyFn(scan, flags)
+}
+
+func (n *nativeBackend) sendVK(vk uint16, flags uint32) error {
+	if err := n.guardKeystroke(); err != nil {
+		return err
+	}
+	return sendVKFn(vk, flags)
+}
+
+func (n *nativeBackend) sendMouse(flags, data uint32) error {
+	// Button events are rare, so this one checks every time — no chunking.
+	if n.guard != nil {
+		if err := n.guard(); err != nil {
+			return err
+		}
+	}
+	return sendMouseFn(flags, data)
+}
 
 // sendVK sends one keyboard event by virtual-key code (WVk field), without
 // the Unicode flag — use for modifier keys + non-character VK like Enter,

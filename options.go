@@ -62,6 +62,12 @@ type config struct {
 	mousePathURL  string
 	flags         map[string]any
 	modifyCmd     func(*exec.Cmd)
+
+	foregroundGuard bool
+	// contentOffsetTolerance bounds how far the page-measured content origin
+	// may fall outside the window manager's rectangle. See
+	// WithContentOffsetTolerance.
+	contentOffsetTolerance int
 }
 
 func defaultConfig() *config {
@@ -72,8 +78,19 @@ func defaultConfig() *config {
 		nativeWindow:  nativeWindow{Scale: 1.0},
 		cursorProfile: CursorHuman,
 		flags:         map[string]any{},
+		// On by default: typing into the wrong window is destructive, and the
+		// check costs one syscall per five characters.
+		foregroundGuard: true,
+
+		contentOffsetTolerance: DefaultContentOffsetTolerance,
 	}
 }
+
+// DefaultContentOffsetTolerance is the slack, in screen pixels, allowed between
+// the content origin measured inside the page and the window rectangle reported
+// by the window manager. Borders and DPI rounding account for a couple of
+// pixels; anything larger is a measurement that cannot be trusted.
+const DefaultContentOffsetTolerance = 4
 
 // Option configures Launch.
 type Option func(*config)
@@ -102,6 +119,19 @@ func WithInputBackend(t BackendType) Option {
 	return func(c *config) { c.inputBackend = t }
 }
 
+// WithForegroundGuard toggles the native backend's foreground check. When on
+// (the default), every keystroke chunk and mouse button event confirms the
+// Chrome window still owns the OS foreground and fails with ErrForegroundLost
+// if it does not — SendInput has no window address, so input from an
+// unfocused browser silently types into whatever took focus.
+//
+// No-op for the CDP backend, which addresses the tab directly and does not
+// need focus at all. Turn it off only when something else already holds a
+// foreground lease for the whole critical section.
+func WithForegroundGuard(on bool) Option {
+	return func(c *config) { c.foregroundGuard = on }
+}
+
 // WithMousePathURL sets the full URL of a mouse-positions endpoint that returns
 // a high-entropy {x,y,delay} cursor path. When set, ProfileHuman moves fetch
 // from it and replay; empty (default) keeps the pure local bezier engine.
@@ -109,15 +139,40 @@ func WithMousePathURL(url string) Option {
 	return func(c *config) { c.mousePathURL = url }
 }
 
-// WithNativeWindow tells the native backend where the Chrome window sits on
-// screen and the OS scale factor, so DOM coordinates can be converted to
-// absolute screen coordinates.
+// WithNativeWindow is a MANUAL OVERRIDE for the coordinate frame, used only
+// when the live window cannot be measured — no HWND resolves, or ContentOffset
+// refuses the page-reported geometry.
+//
+// The normal path does not need it: the kit measures the content origin and the
+// DPI scale from the live window on every frame pin, and those measurements win
+// over anything set here. Set it when a browser is driven natively on a host
+// where the HWND lookup cannot succeed and the window position is known up
+// front instead.
 func WithNativeWindow(x, y int, scale float64) Option {
 	return func(c *config) {
 		if scale <= 0 {
 			scale = 1.0
 		}
 		c.nativeWindow = nativeWindow{X: x, Y: y, Scale: scale}
+	}
+}
+
+// WithContentOffsetTolerance sets how far, in screen pixels, the content origin
+// measured inside the page may sit outside the window rectangle reported by the
+// window manager before ContentOffset refuses it.
+//
+// A few pixels of slack are required: window borders and DPI rounding put the
+// content origin marginally outside the rect on real machines, and a check that
+// fails those fails every job. Beyond that slack the two numbers cannot be
+// reconciled, and the page-reported one is the untrusted half.
+//
+// px <= 0 is ignored. Default 4.
+func WithContentOffsetTolerance(px int) Option {
+	return func(c *config) {
+		if px <= 0 {
+			return
+		}
+		c.contentOffsetTolerance = px
 	}
 }
 

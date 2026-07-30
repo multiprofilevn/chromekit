@@ -20,4 +20,7 @@ func (nativeBackend) KeyChar(context.Context, rune) error                 { retu
 func (nativeBackend) InsertText(context.Context, string) error            { return ErrNotSupported }
 func (nativeBackend) KeyCombo(context.Context, uint16, Modifier) error    { return ErrNotSupported }
 
+// SetWindow is a no-op: this stub never converts CSS to screen pixels.
+func (nativeBackend) SetWindow(Window) {}
+
 var _ Backend = (*nativeBackend)(nil)

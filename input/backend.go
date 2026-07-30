@@ -12,6 +12,18 @@ import (
 // platform (e.g. native backend on macOS/Linux).
 var ErrNotSupported = errors.New("input: not supported on this platform")
 
+// ErrForegroundLost signals the target window no longer owns the OS foreground,
+// so the next keystroke would land in whatever window took it. Emission stops
+// at once — SendInput is not addressed to a window, so continuing would type
+// into a foreign application.
+var ErrForegroundLost = errors.New("input: foreground lost")
+
+// GuardChunkSize is how many characters may be emitted between two
+// ForegroundGuard checks. It bounds the leak: losing the foreground mid-string
+// can spill at most this many keystrokes into a foreign window, in exchange for
+// keeping the check off the per-keystroke path.
+const GuardChunkSize = 5
+
 // MouseButton enumerates the buttons a backend understands.
 type MouseButton int
 
@@ -44,9 +56,27 @@ type Window struct {
 	ContentOffsetY int
 }
 
+// Rect is a window rectangle in absolute screen pixels, as reported by Win32
+// GetWindowRect. It is an OUT-OF-BAND measurement: it comes from the window
+// manager, not from anything the page can script, which is what makes it usable
+// as a sanity bound on offsets measured inside the page realm.
+type Rect struct {
+	Left, Top, Right, Bottom int
+}
+
 // Config bundles knobs the backends need at construction time.
 type Config struct {
 	Window Window
+	// ForegroundGuard is consulted by the lowest-level emitters (sendKey,
+	// sendVK, sendMouse) before input reaches the OS. A non-nil return aborts
+	// the emission and propagates to the caller; return ErrForegroundLost when
+	// the target window no longer owns the foreground. nil disables the check.
+	//
+	// Placing it at the emitters rather than at Keyboard means ClearInput,
+	// Combo, Press, Type and TypeHuman are covered structurally — no call site
+	// has to remember. Keyboard emissions are checked once per GuardChunkSize
+	// characters; mouse button events are checked every time (they are rare).
+	ForegroundGuard func() error
 }
 
 // Modifier is a bitmask of modifier keys for KeyCombo. Compose with bitwise
@@ -88,6 +118,17 @@ type Backend interface {
 	// Returns ErrNotSupported on backends that lack OS keyboard access (CDP,
 	// native on macOS/Linux today).
 	KeyCombo(ctx context.Context, vk uint16, mods Modifier) error
+	// SetWindow replaces the coordinate frame this backend maps CSS pixels
+	// through, IN PLACE. It exists so a re-measured frame can reach a backend
+	// that is already wired into a Cursor / Keyboard / TouchScreen without
+	// replacing the backend object: ~30 call sites read the backend pointer
+	// bare, and swapping it between a MouseDown and its MouseUp leaves the
+	// button held down at the OS level forever.
+	//
+	// Implementations MUST be safe to call while another goroutine is mid-op
+	// and MUST NOT block that op for meaningfully long. Backends that dispatch
+	// over the wire (CDP) have no screen frame and no-op.
+	SetWindow(w Window)
 }
 
 // New returns a backend by type. Native on unsupported platforms returns a

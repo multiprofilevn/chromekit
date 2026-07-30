@@ -75,6 +75,10 @@ func dispatch(ctx context.Context, action chromedp.Action) error {
 
 type cdpBackend struct{}
 
+// SetWindow is a no-op. CDP dispatches into the tab by CSS coordinate; it never
+// touches the OS pointer, so it has no screen coordinate frame to update.
+func (cdpBackend) SetWindow(Window) {}
+
 func newCDP() Backend { return &cdpBackend{} }
 
 func (cdpBackend) MouseMove(ctx context.Context, x, y float64) error {
