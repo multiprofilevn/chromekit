@@ -2,6 +2,7 @@ package chromekit
 
 import (
 	"os/exec"
+	"time"
 
 	"github.com/tuwibu/chromekit/input"
 )
@@ -62,6 +63,10 @@ type config struct {
 	mousePathURL  string
 	flags         map[string]any
 	modifyCmd     func(*exec.Cmd)
+
+	// wsURLReadTimeout bounds how long Launch waits for Chrome to print its
+	// DevTools websocket URL. 0 keeps chromedp's own default (20s).
+	wsURLReadTimeout time.Duration
 
 	foregroundGuard bool
 	// contentOffsetTolerance bounds how far the page-measured content origin
@@ -188,6 +193,23 @@ func WithCursorProfile(p CursorProfile) Option {
 // Stored as raw key/value; consumed by the launcher.
 func WithFlag(key string, value any) Option {
 	return func(c *config) { c.flags[key] = value }
+}
+
+// WithWSURLReadTimeout bounds the wait for Chrome to print its DevTools
+// websocket URL on stderr — the step that fails as
+// "launch: websocket url timeout reached".
+//
+// chromedp defaults to 20s, which a cold profile can exceed on its own: a large
+// user-data-dir, several unpacked extensions, a slow disk, or a dozen browsers
+// launching at once all delay that first line. Raise it on hosts that launch
+// profiles in bulk. d <= 0 keeps the chromedp default.
+func WithWSURLReadTimeout(d time.Duration) Option {
+	return func(c *config) {
+		if d <= 0 {
+			return
+		}
+		c.wsURLReadTimeout = d
+	}
 }
 
 // WithModifyCmd hooks the underlying *exec.Cmd before Chrome starts. Use

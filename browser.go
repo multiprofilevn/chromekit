@@ -180,6 +180,9 @@ func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAlloca
 	if cfg.modifyCmd != nil {
 		opts = append(opts, chromedp.ModifyCmdFunc(withProcessGroupDefaults(cfg.modifyCmd)))
 	}
+	if cfg.wsURLReadTimeout > 0 {
+		opts = append(opts, chromedp.WSURLReadTimeout(cfg.wsURLReadTimeout))
+	}
 	return opts
 }
 
