@@ -4,19 +4,16 @@ package chromekit
 
 import (
 	"os/exec"
-	"syscall"
 )
 
-// createNewProcessGroup mirrors CREATE_NEW_PROCESS_GROUP. Chrome in its own
-// group does not receive the console Ctrl+C that kills the Go parent, so the
-// parent gets to shut it down deliberately instead of both dying half-way.
+// createNewProcessGroup mirrors CREATE_NEW_PROCESS_GROUP for callers that
+// explicitly opt in through WithModifyCmd.
 const createNewProcessGroup = 0x00000200
 
-// applyProcessGroupAttrs restores what chromedp's default cmd hook would have
-// set. Only fills in what the caller has not already chosen.
-func applyProcessGroupAttrs(cmd *exec.Cmd) {
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.CreationFlags |= createNewProcessGroup
-}
+// applyProcessGroupAttrs intentionally does nothing on Windows. In particular,
+// WithModifyCmd must not silently add CREATE_NEW_PROCESS_GROUP: callers that
+// need it can opt in through cmd.SysProcAttr in their hook.
+func applyProcessGroupAttrs(*exec.Cmd) {}
+
+// chromedp's default allocator hook is also a no-op on Windows.
+func applyDefaultProcessAttrs(*exec.Cmd) {}

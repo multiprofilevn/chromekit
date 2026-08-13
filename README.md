@@ -68,6 +68,7 @@ b, _ := chromekit.Launch(
 | Browser  | `NewPage()` / `Pages()` / `Current()`          | manage tabs                               |
 | Browser  | `SwitchPageByIndex/URL/Origin`                 | switch active tab                         |
 | Browser  | `ClosePage(id)` / `Close()`                    | clean teardown (see note below)           |
+| Browser  | `Terminate(ctx)`                               | kill the owned Launch process tree; no-op for Connect |
 | Page     | `Navigate(url, timeout)` / `Reload` / `GoBack` / `GoForward` | navigation             |
 | Page     | `WaitForReady` / `WaitForSelector` / `WaitForChangeURL` / `WaitForFunction` | sync |
 | Page     | `Click(sel)` / `ClickElement(sel)` / `Type(sel, text)` / `Hover(sel)` | high-level shortcut |

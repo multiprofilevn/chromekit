@@ -2,6 +2,7 @@ package chromekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -61,6 +62,11 @@ type Browser struct {
 	// instead of leaking one per call until Close.
 	doneOnce sync.Once
 	doneCh   chan struct{}
+
+	// ownedProcess is non-nil only for Launch. It terminates the exact command
+	// tree before chromedp contexts are cancelled and memoizes the result.
+	ownedProcess *ownedProcess
+	teardownOnce sync.Once
 }
 
 // isClosedLocked reports whether Close() has already signalled shutdown. Caller
@@ -97,23 +103,45 @@ func Launch(chromePath string, opts ...Option) (*Browser, error) {
 		return nil, fmt.Errorf("%w: native input requires a visible window (headless=false)", ErrInvalidConfig)
 	}
 
-	allocOpts := buildAllocatorOptions(chromePath, cfg)
+	owned := newOwnedProcess(terminateOwnedProcessTree)
+	allocOpts := buildAllocatorOptions(chromePath, cfg, owned)
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), allocOpts...)
 
 	ctx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(cfg.logger.Debugf))
 	if err := chromedp.Run(ctx); err != nil {
+		terminateCtx, terminateCancel := context.WithTimeout(context.Background(), ownedProcessTerminateTimeout)
+		terminateErr := owned.Terminate(terminateCtx)
+		terminateCancel()
 		cancel()
 		allocCancel()
-		return nil, fmt.Errorf("%w: launch: %s", ErrInvalidConfig, err.Error())
+		launchErr := fmt.Errorf("%w: launch: %s", ErrInvalidConfig, err.Error())
+		if terminateErr != nil {
+			return nil, errors.Join(launchErr, fmt.Errorf("terminate failed launch: %w", terminateErr))
+		}
+		return nil, launchErr
+	}
+	if err := owned.rememberIdentity(); err != nil {
+		terminateCtx, terminateCancel := context.WithTimeout(context.Background(), ownedProcessTerminateTimeout)
+		terminateErr := owned.Terminate(terminateCtx)
+		terminateCancel()
+		cancel()
+		allocCancel()
+		identityErr := fmt.Errorf("%w: capture launched process identity: %v", ErrInvalidConfig, err)
+		if terminateErr != nil {
+			return nil, errors.Join(identityErr, fmt.Errorf("terminate failed launch: %w", terminateErr))
+		}
+		return nil, identityErr
 	}
 
 	b := &Browser{
-		ctx:         ctx,
-		cancel:      cancel,
-		allocCancel: allocCancel,
-		cfg:         cfg,
-		log:         cfg.logger,
+		ctx:          ctx,
+		cancel:       cancel,
+		allocCancel:  allocCancel,
+		cfg:          cfg,
+		log:          cfg.logger,
+		ownedProcess: owned,
 	}
+	go b.cleanupOwnedProcessOnContextDone()
 	// Capture chrome PID from chromedp's allocator. Required for HWND lookup
 	// via PID enum — without it Focus falls back to page-title heuristic which
 	// fails on blank pages (the typical state at automation start).
@@ -155,7 +183,7 @@ func resolveLaunchTarget(ctx context.Context) (string, error) {
 	return string(c.Target.TargetID), nil
 }
 
-func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAllocatorOption {
+func buildAllocatorOptions(chromePath string, cfg *config, owned *ownedProcess) []chromedp.ExecAllocatorOption {
 	// chromekit intentionally does NOT prepend chromedp.DefaultExecAllocatorOptions.
 	// Callers own the entire flag list — per-engine profiles (gologin / gpmlogin /
 	// stock Chrome) need wildly different sets, and silent defaults made it
@@ -177,20 +205,19 @@ func buildAllocatorOptions(chromePath string, cfg *config) []chromedp.ExecAlloca
 	for k, v := range cfg.flags {
 		opts = append(opts, chromedp.Flag(k, v))
 	}
-	if cfg.modifyCmd != nil {
-		opts = append(opts, chromedp.ModifyCmdFunc(withProcessGroupDefaults(cfg.modifyCmd)))
-	}
+	// Always install our command hook: exec.CommandContext otherwise kills only
+	// the root process on cancellation, leaving Chrome helpers behind.
+	opts = append(opts, chromedp.ModifyCmdFunc(withOwnedProcessCmd(owned, cfg.modifyCmd)))
 	if cfg.wsURLReadTimeout > 0 {
 		opts = append(opts, chromedp.WSURLReadTimeout(cfg.wsURLReadTimeout))
 	}
 	return opts
 }
 
-// withProcessGroupDefaults wraps a user hook so chromedp's own process-group
-// setup still happens. ModifyCmdFunc REPLACES chromedp's default cmd hook, and
-// that default is what puts Chrome in its own process group / death-signal —
-// the mechanism that reaps Chrome when the Go process dies without calling
-// Close(). Silently dropping it strands an orphaned browser after every crash.
+// withProcessGroupDefaults wraps a user hook with the platform lifecycle
+// attributes required when ModifyCmdFunc replaces chromedp's default hook.
+// Windows intentionally adds no implicit creation flags; non-Windows keeps the
+// existing process-group behavior for user-modified commands.
 func withProcessGroupDefaults(fn func(*exec.Cmd)) func(*exec.Cmd) {
 	return func(cmd *exec.Cmd) {
 		applyProcessGroupAttrs(cmd)
@@ -212,62 +239,81 @@ func withProcessGroupDefaults(fn func(*exec.Cmd)) func(*exec.Cmd) {
 // Measured over 30 Connect/Close cycles: goroutines and heap stay flat, the
 // user's tabs and Chrome process survive.
 //
-// Returns error for firefoxkit signature parity. chromekit's teardown is
-// pure context cancellation — chromedp reports no failure path for it — so
-// every return here is nil, on the first call and every one after (there is
-// no closeOnce gate around the body: it already tolerates repeat calls,
-// since a second pass just cancels already-cancelled contexts and walks a
-// nil'd page slice). Matches firefoxkit's own contract on a second call
-// (its closeOnce-gated body never reruns, so its local firstErr stays nil
-// regardless of what the first call did) — see phase-06 test pin. If a
-// future change adds an operation here that can genuinely fail, thread its
-// error into the return instead of swallowing it.
+// Launch teardown first terminates the complete owned process tree, then
+// cancels browser/page/allocator contexts. The operation is idempotent and
+// serializes concurrent attempts and caches only verified success. A failed
+// termination remains retryable on a later Close/Terminate call.
+// Connect never invokes a process terminator.
 func (b *Browser) Close() error {
-	b.signalClosed()
+	if b == nil {
+		return nil
+	}
+	var terminateErr error
+	if !b.attached {
+		ctx, cancel := context.WithTimeout(context.Background(), ownedProcessTerminateTimeout)
+		terminateErr = b.Terminate(ctx)
+		cancel()
+	}
+	b.teardownOnce.Do(func() {
+		b.pagesMu.Lock()
+		pages := b.pages
+		b.pages = nil
+		b.current = nil
+		b.pagesMu.Unlock()
 
-	b.pagesMu.Lock()
-	pages := b.pages
-	b.pages = nil
-	b.current = nil
-	b.pagesMu.Unlock()
+		// Signal only after owned-tree termination. Done observers can then rely
+		// on a launched browser having no surviving helper processes.
+		b.signalClosed()
 
-	if b.attached {
-		// Cancelling a page context makes chromedp send Target.closeTarget for
-		// that tab. Correct for tabs chromekit opened; destructive for tabs the
-		// user already had. Detach the latter first so the cancel tears down
-		// their goroutines without touching the tab itself.
-		for i := len(pages) - 1; i >= 0; i-- {
-			p := pages[i]
-			if p.cancel == nil {
-				continue
+		if b.attached {
+			// Cancelling a page context makes chromedp send Target.closeTarget for
+			// that tab. Correct for tabs chromekit opened; destructive for tabs the
+			// user already had. Detach the latter first so the cancel tears down
+			// their goroutines without touching the tab itself.
+			for i := len(pages) - 1; i >= 0; i-- {
+				p := pages[i]
+				if p.cancel == nil {
+					continue
+				}
+				if !p.owned {
+					detachWithoutClosing(p.ctx)
+				}
+				p.cancel()
 			}
-			if !p.owned {
-				detachWithoutClosing(p.ctx)
+			detachWithoutClosing(b.ctx)
+		} else {
+			for i := len(pages) - 1; i >= 0; i-- {
+				if pages[i].cancel != nil {
+					pages[i].cancel()
+				}
 			}
-			p.cancel()
 		}
-		detachWithoutClosing(b.ctx)
 		if b.cancel != nil {
 			b.cancel()
 		}
 		if b.allocCancel != nil {
 			b.allocCancel()
 		}
+	})
+	return terminateErr
+}
+
+func (b *Browser) cleanupOwnedProcessOnContextDone() {
+	<-b.ctx.Done()
+	ctx, cancel := context.WithTimeout(context.Background(), ownedProcessTerminateTimeout)
+	_ = b.Terminate(ctx)
+	cancel()
+}
+
+// Terminate kills the complete process tree owned by a Browser created with
+// Launch. It is safe to call concurrently and returns the cached first result.
+// For a Browser created with Connect it is always a no-op: the caller owns that
+// Chrome process.
+func (b *Browser) Terminate(ctx context.Context) error {
+	if b == nil || b.attached || b.ownedProcess == nil {
 		return nil
 	}
-
-	for i := len(pages) - 1; i >= 0; i-- {
-		if pages[i].cancel != nil {
-			pages[i].cancel()
-		}
-	}
-	if b.cancel != nil {
-		b.cancel()
-	}
-	if b.allocCancel != nil {
-		b.allocCancel()
-	}
-	return nil
+	return b.ownedProcess.Terminate(ctx)
 }
 
 // detachWithoutClosing makes a chromedp context safe to cancel without taking

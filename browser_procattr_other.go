@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package chromekit
 
@@ -17,3 +17,6 @@ func applyProcessGroupAttrs(cmd *exec.Cmd) {
 	}
 	cmd.SysProcAttr.Setpgid = true
 }
+
+// chromedp's default allocator hook is a no-op outside Linux.
+func applyDefaultProcessAttrs(*exec.Cmd) {}

@@ -114,9 +114,9 @@ func TestOwnedFlagWiring(t *testing.T) {
 }
 
 func TestWithProcessGroupDefaults_PreservesUserHook(t *testing.T) {
-	// ModifyCmdFunc replaces chromedp's own cmd hook, which is what puts Chrome
-	// in its own process group. The wrapper must restore that AND still run the
-	// caller's hook.
+	// ModifyCmdFunc replaces chromedp's own cmd hook. The wrapper must preserve
+	// the caller's hook; platform-specific attribute behavior is pinned in the
+	// browser_procattr_* tests.
 	called := false
 	hook := withProcessGroupDefaults(func(cmd *exec.Cmd) {
 		called = true
@@ -128,9 +128,6 @@ func TestWithProcessGroupDefaults_PreservesUserHook(t *testing.T) {
 
 	if !called {
 		t.Fatal("user hook not invoked")
-	}
-	if cmd.SysProcAttr == nil {
-		t.Fatal("process attributes not restored — Chrome would be orphaned on a hard exit")
 	}
 	found := false
 	for _, a := range cmd.Args {
