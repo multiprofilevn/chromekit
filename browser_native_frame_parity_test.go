@@ -15,7 +15,7 @@ package chromekit
 import (
 	"context"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 var (

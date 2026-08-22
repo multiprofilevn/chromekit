@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // A Page caches its backend, its Cursor and its Keyboard behind ONE sync.Once

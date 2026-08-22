@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // resolveChromePath returns a usable chrome.exe path for integration/stress

@@ -5,7 +5,7 @@ package chromekit
 import (
 	"context"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // SetHWND is a no-op on non-Windows platforms.

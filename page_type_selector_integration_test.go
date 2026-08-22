@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // fastHumanCfg keeps the integration test under a couple of seconds while

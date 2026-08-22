@@ -6,7 +6,7 @@ import (
 
 	cdpinput "github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // KeyboardAPI groups keyboard primitives. Selector-based p.Type(sel, text)

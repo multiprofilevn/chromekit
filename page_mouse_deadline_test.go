@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // ctxCapturingBackend records the context of the first MouseMove so a test can

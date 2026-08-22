@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // SetGestureLimit caps how many mouse gestures run concurrently in THIS process

@@ -5,7 +5,7 @@ package chromekit
 import (
 	"math"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // windowScaleTolerance is the fraction by which the page's own

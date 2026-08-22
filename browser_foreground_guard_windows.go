@@ -5,7 +5,7 @@ package chromekit
 import (
 	"sync"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // foregroundGuard builds the closure the native input backend consults before

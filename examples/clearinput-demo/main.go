@@ -11,8 +11,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/tuwibu/chromekit"
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 const page = `data:text/html,` +

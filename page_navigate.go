@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // Navigate loads url and waits for document.readyState == "complete".

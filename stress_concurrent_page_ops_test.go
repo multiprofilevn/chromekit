@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // Concurrent ops on one page: gestures, Evaluate, Screenshot, listener

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // windowMetrics is the geometry Chrome reports about its own window, read from

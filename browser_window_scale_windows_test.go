@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // The numbers in this file are not invented. They come from a real Chrome

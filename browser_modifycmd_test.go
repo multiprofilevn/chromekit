@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tuwibu/chromekit"
+	"github.com/multiprofilevn/chromekit"
 )
 
 // TestWithModifyCmd_HookFiresBeforeStart pins the contract: the hook must

@@ -3,7 +3,7 @@ package chromekit
 import (
 	"errors"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // ErrForegroundLost is raised when the browser window lost the OS foreground

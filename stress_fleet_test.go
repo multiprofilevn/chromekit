@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // stressPage keeps its renderer's main thread busy (a rAF loop burning a few ms

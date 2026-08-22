@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // resolveChromePath lives in stress_helpers_test.go (build tag

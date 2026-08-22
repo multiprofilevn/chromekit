@@ -1,4 +1,4 @@
-module github.com/tuwibu/chromekit
+module github.com/multiprofilevn/chromekit
 
 go 1.26.2
 

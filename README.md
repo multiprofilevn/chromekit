@@ -5,7 +5,7 @@ Go package wrapping [chromedp](https://github.com/chromedp/chromedp) with a Pupp
 ## Install
 
 ```bash
-go get github.com/tuwibu/chromekit
+go get github.com/multiprofilevn/chromekit
 ```
 
 ## Quickstart — attach to running Chrome
@@ -26,7 +26,7 @@ import (
     "os"
     "time"
 
-    "github.com/tuwibu/chromekit"
+    "github.com/multiprofilevn/chromekit"
 )
 
 func main() {

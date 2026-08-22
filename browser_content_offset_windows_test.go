@@ -5,7 +5,7 @@ package chromekit
 import (
 	"testing"
 
-	"github.com/tuwibu/chromekit/input"
+	"github.com/multiprofilevn/chromekit/input"
 )
 
 // Chrome paints its own title bar and tab strip INSIDE the Win32 client area,
