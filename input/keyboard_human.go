@@ -65,7 +65,7 @@ func (k *Keyboard) TypeHuman(ctx context.Context, text string, cfg ...HumanTypeC
 		return rand.Intn(n)
 	}
 
-	for _, ch := range text {
+	for _, ch := range normalizeLineBreaks(text) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -85,7 +85,7 @@ func (k *Keyboard) TypeHuman(ctx context.Context, text string, cfg ...HumanTypeC
 				}
 			}
 		}
-		if err := k.backend.KeyChar(ctx, ch); err != nil {
+		if err := k.emitRune(ctx, ch); err != nil {
 			return err
 		}
 		if err := sleepCtx(ctx, humanDelay(c.MinDelay, c.MaxDelay, randInt)); err != nil {
