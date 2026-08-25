@@ -327,9 +327,23 @@ func (b *Browser) Terminate(ctx context.Context) error {
 // the close while every goroutine still exits on cancellation.
 //
 // Only call this immediately before cancelling: it makes the context unusable
-// for further operations.
+// for further operations, and the cancellation is what makes the write safe.
+//
+// Context.Target is guarded by nothing, and the cleanup goroutine reads it
+// three times — a nil check, then the session id, then the target id. Writing
+// it while that goroutine is awake is a data race whose losing outcome is the
+// reader passing the nil check and dereferencing nil one line later, which
+// panics on a goroutine no recover can reach and takes the process down.
+//
+// Cancelling afterwards is what orders the write: the reader is parked on
+// ctx.Done() until then, and the channel close publishes everything written
+// before it. A context that is ALREADY done gives no such edge — that reader is
+// running right now — so the write is skipped there. Nothing is lost by
+// skipping: the close-target it would have suppressed is already in flight, and
+// the browser that reached that state (chromedp cancels the context itself when
+// the connection drops) is gone along with the tabs the suppression protects.
 func detachWithoutClosing(ctx context.Context) {
-	if ctx == nil {
+	if ctx == nil || ctx.Err() != nil {
 		return
 	}
 	if c := chromedp.FromContext(ctx); c != nil {
