@@ -101,6 +101,12 @@ func (b *Browser) attachNewTarget(tid string) *Page {
 // verifyAttached forces the lazy CDP session to materialize and reports
 // whether the target is actually reachable.
 func (p *Page) verifyAttached() error {
+	// Never let the probe below be the attach itself: it runs on a bounded
+	// child context, and chromedp gives the context it attached with to the
+	// target's event loop — the session would die when the probe expired.
+	if err := p.ensureAttached(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(p.ctx, attachProbeTimeout)
 	defer cancel()
 	var ready string

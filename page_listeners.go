@@ -27,10 +27,16 @@ type downloadEvent struct {
 // from any feature module (OnDialog, OnConsole, SetDownloadPath).
 func (p *Page) initListeners() {
 	p.listenersOnce.Do(func() {
-		_ = chromedp.Run(p.ctx,
-			cdppage.Enable(),
-			runtime.Enable(),
-		)
+		// Attach through the guard first: this used to be the very first Run on
+		// a freshly created page context, i.e. the lazy attach itself, which
+		// must never race another one (see ensureAttached). Enabling the
+		// domains only makes sense once that succeeded anyway.
+		if err := p.ensureAttached(); err == nil {
+			_ = chromedp.Run(p.ctx,
+				cdppage.Enable(),
+				runtime.Enable(),
+			)
+		}
 		chromedp.ListenTarget(p.ctx, p.dispatchEvent)
 	})
 }

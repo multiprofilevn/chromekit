@@ -53,6 +53,12 @@ type Page struct {
 	keyboard   *input.Keyboard
 	touch      *input.TouchScreen
 
+	// attachMu/attached serialise the lazy CDP attach chromedp performs on the
+	// first Run against p.ctx. See ensureAttached — concurrent first Runs race
+	// an unsynchronised field inside chromedp and can crash the process.
+	attachMu sync.Mutex
+	attached bool
+
 	listenersOnce  sync.Once
 	listenerMu     sync.RWMutex
 	dialogHandler  func(DialogEvent) DialogAction
@@ -238,12 +244,25 @@ func opCtx(parent context.Context, timeout time.Duration) (context.Context, cont
 	return context.WithTimeout(parent, timeout)
 }
 
-// alive returns ErrContextCanceled if the page context is done.
+// alive returns ErrContextCanceled if the page context is done, and otherwise
+// guarantees the page's CDP session is attached before the caller runs against
+// it.
+//
+// Every public page operation already calls alive() first, which makes it the
+// single place that can hold the attach invariant without touching the sixty-odd
+// chromedp.Run call sites individually. See ensureAttached for why the first Run
+// must never happen on two goroutines at once.
 func (p *Page) alive() error {
 	select {
 	case <-p.ctx.Done():
 		return ErrContextCanceled
 	default:
-		return nil
 	}
+	if err := p.ensureAttached(); err != nil {
+		if p.ctx.Err() != nil {
+			return ErrContextCanceled
+		}
+		return fmt.Errorf("%w: attach page %s: %s", ErrNavigate, p.id, err.Error())
+	}
+	return nil
 }

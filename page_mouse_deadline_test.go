@@ -50,7 +50,9 @@ func (b *ctxCapturingBackend) KeyCombo(context.Context, uint16, input.Modifier) 
 // newStubMousePage builds a Page whose input stack is the given backend, without
 // a real Chrome connection. ProfileMachine keeps MoveTo to a single dispatch.
 func newStubMousePage(ctx context.Context, be input.Backend) *Page {
-	p := &Page{ctx: ctx, cfg: defaultConfig()}
+	// attached: the stub stands in for a live page, so alive() must not try to
+	// drive chromedp's lazy attach against this bare context.
+	p := &Page{ctx: ctx, cfg: defaultConfig(), attached: true}
 	p.mouseAPI = &MouseAPI{p: p}
 	// Consume inputOnce so the real initInput() (which builds a CDP backend
 	// needing a live browser) never runs and overwrites our stub.

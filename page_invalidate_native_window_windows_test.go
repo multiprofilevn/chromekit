@@ -130,7 +130,9 @@ func TestInvalidate_ChromeCursorAndKeyboardSeeNewWindow(t *testing.T) {
 
 	b := &Browser{log: noopLogger{}, cfg: cfg, ctx: context.Background()}
 	fake := &frameBackend{}
-	p := &Page{ctx: context.Background(), log: noopLogger{}, cfg: cfg, browser: b}
+	// attached: the stub stands in for a live page, so alive() must not try to
+	// drive chromedp's lazy attach against this bare context.
+	p := &Page{ctx: context.Background(), log: noopLogger{}, cfg: cfg, browser: b, attached: true}
 	p.backend = fake // honoured by initInput()'s "pre-set by tests" path
 	p.mouseAPI = &MouseAPI{p: p}
 	p.keyboardAPI = &KeyboardAPI{p: p}
